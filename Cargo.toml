@@ -5,8 +5,6 @@ edition = "2024"
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
-# RTU serial support (optional)
 tokio-serial = { version = "5.4"  }
-voltage_modbus =  { version = "0.4.6", features = ["rtu"] }
-
+tokio-modbus = "0.17.0"
 
