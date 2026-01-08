@@ -7,6 +7,7 @@ use tokio::time::sleep;
 // use tokio_modbus::client::Client;
 
 use tokio_modbus::client::{Client, Reader, Writer};
+// use byteorder::{BigEndian, ByteOrder};
 
     
 /// # Modbus node address assignments
@@ -31,55 +32,31 @@ const NODEID_QUAD_RELAY: u8 = 0x5F; // TODO not yet programmed into relay board
 const NODEID_MAX: u8 = 0x7F;
 
 /// Register addresses
-const REG_NODEID_IV_START: u16 = 0x00;
 const REG_NODEID_TK:u16 = 0x20; // dual Type-K thermocouple reader
 const REG_NODEID_IV:u16 = 0x40; // 0-10 Volt, 0-5 Amp IV ADC
 const REG_NODEID_PREC_CURR:u16 = 0x00; // Precision current source YK-PVCCS0100/YK-PVCC1000
+const REG_SAVE_CFG_PREC_CURR:u16 = 0x02; // Cause YK-PVCCS to persist its parameters.
+const REG_IV_ADC_2CH_VALS: u16 = 0x00; // Where 2CH IV ADC stores read values
 const REG_NODEID_PYRO_CURR_GEN:u16 = 0x04; // TODO wrong! node ID may not be settable for Taidacent-B0B7HLZ6B4 
 
-// --- TODO example of overwriting the dual TK address:
-    // let first_node: Slave = Slave(0x01);
-    // let port: SerialStream = SerialStream::open(&builder).unwrap();
-    // let mut ctx = rtu::attach_slave(port, first_node);
 
-    // const DEVICE_ADDRESS_REG:u16 = 0x20;
-    // println!("Connecting first... ");
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(DEVICE_ADDRESS_REG, 3).await??;
-    // println!(" read_rsp: {:?}", read_rsp);
+/// Combine two u16 registers into an i32
+fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
+    let high = registers[offset] as i32;
+    let low = registers[offset + 1] as i32;
+    let combined = (high << 16) | low;
+    combined
+}
 
-    // const NEW_DEVICE_ADDR:u8 = 0x3F;
-    // let w_resp = ctx.write_single_register(DEVICE_ADDRESS_REG, NEW_DEVICE_ADDR.into()).await?;
-    // println!(" w_resp: {:?}", w_resp);
-
-    // println!("Disconnecting first");
-    // ctx.disconnect().await?;
-
-
-    // println!("Connecting second... ");
-    // let second_node: Slave = Slave(NEW_DEVICE_ADDR);
-    // let port = SerialStream::open(&builder).unwrap();
-    // let mut ctx = rtu::attach_slave(port, second_node);
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(DEVICE_ADDRESS_REG, 3).await??;
-    // println!(" read_rsp: {:?}", read_rsp);
-
-// --- TODO example of overwriting the IV ADC address:
-    // const DEVICE_ADDRESS_REG:u16 = 0x40; // IV
-    // println!("Connecting first... ");
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(DEVICE_ADDRESS_REG, 3).await??;
-    // println!(" read_rsp: {:?}", read_rsp);
-    // const NEW_DEVICE_ADDR:u8 = NODEID_ADDR_IV_ADC;
-    // let w_resp = ctx.write_single_register(DEVICE_ADDRESS_REG, NEW_DEVICE_ADDR.into()).await?;
-    // println!(" w_resp: {:?}", w_resp);
-
-    // println!("Disconnecting first");
-    // ctx.disconnect().await?;
-
-    // println!("Connecting second... ");
-    // let second_node: Slave = Slave(NEW_DEVICE_ADDR);
-    // let port = SerialStream::open(&builder).unwrap();
-    // let mut ctx = rtu::attach_slave(port, second_node);
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(DEVICE_ADDRESS_REG, 3).await??;
-    // println!(" read_rsp: {:?}", read_rsp);
+// /// Combine two u16 registers into am f32
+// fn registers_to_f32(registers: &[u16], offset: usize) -> f32 {
+//     let high = registers[offset] as u32;
+//     let low = registers[offset + 1] as u32;
+//     let combined = (high << 16) | low;
+    
+//     // Convert u32 to f32
+//     f32::from_bits(combined)
+// }
 
 /**
  * Set the pyro simulator current loop controller (4-20 mA) current value
@@ -142,28 +119,30 @@ async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32,  reg_node_id: u1
     let port = tokio_serial::SerialStream::open(&builder).unwrap();
     let mut ctx = tokio_modbus::prelude::rtu::attach_slave(port, first_node);
 
-    println!("Reading node ID from node {old_node_id:?} first... ");
+    println!("Read existing node ID from node {old_node_id:?} first... ");
     let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
     println!("> read_rsp: {:?}", read_rsp);
 
-    let existing_node_id = read_rsp[4] as u8;
+    let existing_node_id = read_rsp[0] as u8;
     if existing_node_id != old_node_id {
         if existing_node_id != new_node_id {
-            // println!("Node ID {old_node_id:?} reports node ID of {existing_node_id:?}");
+            println!("Node ID {old_node_id:?} reports node ID of {existing_node_id:?}");
             panic!("Couldn't verify the old node ID");
         }
     }
  
     if existing_node_id == old_node_id {
-        println!("writing {new_node_id:?} to reg {reg_node_id:?}");
+        println!("writing new node ID {new_node_id:?} to reg {reg_node_id:?}");
         let w_resp = ctx.write_single_register(reg_node_id, new_node_id.into()).await?;
-        println!("> w_resp: {:?}", w_resp);
+        if w_resp.is_err() {
+            eprintln!("> w_resp: {:?}", w_resp);
+        }
     }
 
     println!("Disconnecting from old node id: {old_node_id:?}");
     ctx.disconnect().await?;
     
-
+    //Wait for device to reset, if necessary
     sleep(Duration::from_millis(1000)).await;
 
     println!("Connecting to new node id: {new_node_id:?}");
@@ -172,7 +151,20 @@ async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32,  reg_node_id: u1
     let mut ctx = tokio_modbus::prelude::rtu::attach_slave(port, second_node);
     let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
     println!("> read_rsp: {:?}", read_rsp);
-        
+    let latest_node_id = read_rsp[0] as u8;
+    if latest_node_id != new_node_id {
+        eprintln!("latest_node_id {latest_node_id:?} != {new_node_id:?}");
+    }
+
+    if new_node_id == NODEID_PREC_CURR_SRC {
+        // flush the configuration parameter change to the node's persistent storage 
+        println!("persisting node configuration");
+        let flush_resp = ctx.write_single_register(REG_SAVE_CFG_PREC_CURR, 1).await?;
+        if flush_resp.is_err() {
+            eprintln!("> flush_resp: {:?}", flush_resp);
+        }
+    }
+
     println!("Disconnecting from new node id: {new_node_id:?}");
     ctx.disconnect().await?;
 
@@ -199,11 +191,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Check IV ADC... ");
     let mut ctx_iv_adc: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_IV_ADC));
-    let read_rsp: Vec<u16> = ctx_iv_adc.read_holding_registers(REG_NODEID_IV, 1).await??;
-    println!(" IV ADC Node ID: {:?}", read_rsp);
-    let read_rsp: Vec<u16> = ctx_iv_adc.read_holding_registers(REG_NODEID_IV_START, 4).await??;
-    println!(" First four IV ADC regs: {:?}", read_rsp);
-    println!("Disconnecting IV ADC");
+    let read_rsp: Vec<u16> = ctx_iv_adc.read_holding_registers(REG_NODEID_IV, 3).await??;
+    println!(" IV_ADC CFG ({REG_NODEID_IV:?})[3]: {read_rsp:?}");
+    let iv_adc_vals: Vec<u16> = ctx_iv_adc.read_holding_registers(REG_IV_ADC_2CH_VALS, 4).await??;
+    println!(" IV_ADC VALS ({REG_IV_ADC_2CH_VALS:?})[4]: {iv_adc_vals:?}");
+    let ch1_value = registers_to_i32(&iv_adc_vals, 0);
+    let verified_volts = (ch1_value as f32) / 10000.0; // resolution is 0.1 mV for 10V range
+    let ch2_value = registers_to_i32(&iv_adc_vals, 2);
+    let verified_milliamps = (ch2_value as f32)/ 10.0; // resolution is 0.1 mA for 5A range
+    println!(" IV ADC ch1_value: {ch1_value:?} = {verified_volts:?} V");
+    println!(" IV ADC ch2_value: {ch2_value:?} = {verified_milliamps:?} mA");
+
+    // println!("Disconnecting IV ADC");
     ctx_iv_adc.disconnect().await?;
 
     println!("Check Dual TK... ");
@@ -211,30 +210,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let read_rsp: Vec<u16> = ctx_dual_tk.read_holding_registers(REG_NODEID_TK, 1).await??;
     println!(" Dual TK node ID: {:?}", read_rsp);
 
+    let cfg_rsp: Vec<u16> = ctx_dual_tk.read_holding_registers(0x20, 3).await??;
+    println!(" 0x20 cfg_rsp: {:?}", cfg_rsp);
+
+    let ch_valid_rsp: Vec<u16> = ctx_dual_tk.read_holding_registers(0x10, 2).await??;
+    println!(" 0x10 ch_valid_rsp: {:?}", ch_valid_rsp);
+    let ch1_tk_conn: bool = ch_valid_rsp[0] == 0; // 0: The thermocouple is connected, 1: The thermocouple is not connected
+    let ch2_tk_conn: bool = ch_valid_rsp[1] == 0;
+
     // TODO use reg address consts
     // example of reading all the dual TK registers:
-    let read_rsp: Vec<u16> = ctx_dual_tk.read_holding_registers(0x00, 2).await??;
-    println!(" read_rsp: {:?}", read_rsp);
+    let tk_resp: Vec<u16> = ctx_dual_tk.read_holding_registers(0x00, 2).await??;
+    println!(" 0x00 temp_rsp: {:?}", tk_resp);
+    let ch1_tk_val: f32 = (tk_resp[0] as f32) / 10.0; // resolution is 0.1 °C
+    let ch2_tk_val: f32 = (tk_resp[1] as f32) / 10.0; // resolution is 0.1 °C
 
-    // let read_state = client.read_03(1, 0x10, 2).await;
-    let read_rsp: Vec<u16> = ctx_dual_tk.read_holding_registers(0x10, 2).await??;
-    println!(" read_rsp: {:?}", read_rsp);
+    if ch1_tk_conn {
+        println!("TK1 connected, {ch1_tk_val:?} °C");
+    }
+    if ch2_tk_conn {
+        println!("TK2 connected, {ch2_tk_val:?} °C");
+    }
 
-    // let read_cfg = client.read_03(1, 0x20, 3).await;
-    let read_rsp: Vec<u16> = ctx_dual_tk.read_holding_registers(0x20, 3).await??;
-    println!(" read_rsp: {:?}", read_rsp);
 
-    println!("Disconnecting Dual TK");
+
+    // println!("Disconnecting Dual TK");
     ctx_dual_tk.disconnect().await?;
 
     println!("Check Prec Curr Src... ");
-    let mut ctx_prec_curr: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT)); //NODEID_PREC_CURR_SRC)); // TODO this one isn't persisting its node ID
+    let mut ctx_prec_curr: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_PREC_CURR_SRC)); 
     let read_rsp: Vec<u16> = ctx_prec_curr.read_holding_registers(REG_NODEID_PREC_CURR, 1).await??;
     println!(" read_rsp: {:?}", read_rsp);
 
     set_precision_current_drive(&mut ctx_prec_curr, 5.7).await?;
 
-    println!("Disconnecting Prec Curr Src");
+    // println!("Disconnecting Prec Curr Src");
     ctx_prec_curr.disconnect().await?;
 
     Ok(())
