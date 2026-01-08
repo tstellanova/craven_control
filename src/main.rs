@@ -12,7 +12,8 @@ use tokio_modbus::client::{Client, Reader, Writer};
 /// # Modbus node address assignments
 ///
 /// | Address | Description |
-/// |------|----------|
+/// |-------|----------|
+/// | 0x01  | Reserved for Modbus default node ID |
 /// | 0x1F  | Current-Voltage 2 channel ADC   |
 /// | 0x2F  | Precision current source (0-1000 mA)   |
 /// | 0x3F  | Dual Type-K Thermocouple Reader |
@@ -20,20 +21,21 @@ use tokio_modbus::client::{Client, Reader, Writer};
 /// 
 /// 
 
+/// Modbus node IDs
 const NODEID_DEFAULT: u8 = 0x01; // The Modbus node ID that most devices default to
 const NODEID_IV_ADC: u8 = 0x1F;
-const NODEID_PREC_CURR_SRC: u8 =  0x2F;
+const NODEID_PREC_CURR_SRC: u8 = 0x2F;
 const NODEID_DUAL_TK: u8 = 0x3F;
-const NODEID_PYRO_CURR_GEN: u8 = 0x4F; 
-const NODEID_QUAD_RELAY: u8 = 0x5F;
+const NODEID_PYRO_CURR_GEN: u8 = 0x4F; // TODO switching to new current loop signal generator
+const NODEID_QUAD_RELAY: u8 = 0x5F; // TODO not yet programmed into relay board
 const NODEID_MAX: u8 = 0x7F;
 
 /// Register addresses
 const REG_NODEID_IV_START: u16 = 0x00;
-const REG_NODEID_TK:u16 = 0x20; // TK
-const REG_NODEID_IV:u16 = 0x40; // IV
+const REG_NODEID_TK:u16 = 0x20; // dual Type-K thermocouple reader
+const REG_NODEID_IV:u16 = 0x40; // 0-10 Volt, 0-5 Amp IV ADC
 const REG_NODEID_PREC_CURR:u16 = 0x00; // Precision current source YK-PVCCS0100/YK-PVCC1000
-const REG_NODEID_PYRO_CURR_GEN:u16 = 0x04; // Taidacent-B0B7HLZ6B4 node ID register
+const REG_NODEID_PYRO_CURR_GEN:u16 = 0x04; // TODO wrong! node ID may not be settable for Taidacent-B0B7HLZ6B4 
 
 // --- TODO example of overwriting the dual TK address:
     // let first_node: Slave = Slave(0x01);
@@ -111,7 +113,7 @@ async fn set_precision_current_drive(ctx: &mut tokio_modbus::client::Context, mi
 
     println!("set_precision_current_drive: {milliamps:?} mA");
 
-    // println!("Reading existing drive current value");
+    println!("Reading existing drive current value");
     let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_ADDR_DRIVE_MILLIAMPS, 1).await??;
     println!("existing current read_rsp: {read_rsp:?}");
     // let original_ma_val = read_rsp[0];
@@ -126,7 +128,8 @@ async fn set_precision_current_drive(ctx: &mut tokio_modbus::client::Context, mi
     sleep(Duration::from_millis(500)).await;
 
     let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_ADDR_MONITOR_MILLIAMPS, 1).await??;
-    println!("actual current mA: {read_rsp:?}");
+    let actual_ma = (read_rsp[0] as f32)/10.0;
+    println!("actual current: {actual_ma:?} mA");
 
     Ok(())
 }
@@ -186,82 +189,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tty_path = "/dev/cu.usbserial-BG02SI88";
     let baud_rate = 9600;
 
-    // example of setting the Modbus node ID for a particular device
+    // Examples of setting the Modbus node ID for various devices -- need only be done once
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_IV, NODEID_DEFAULT, NODEID_IV_ADC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PREC_CURR, NODEID_DEFAULT, NODEID_PREC_CURR_SRC).await?;
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_TK, NODEID_DEFAULT, NODEID_DUAL_TK).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PYRO_CURR_GEN, NODEID_DEFAULT, NODEID_PYRO_CURR_GEN).await?;
 
     let builder = tokio_serial::new(tty_path, baud_rate);
-    let first_node: Slave = Slave(NODEID_PREC_CURR_SRC);//NODEID_PYRO_CURR_GEN); //NODEID_PREC_CURR_SRC); //TODO: NODEID_ADDR_PREC_CURR_SRC); // NODEID_DEFAULT); // or eg NODEID_DUAL_TK
-    let port: SerialStream = SerialStream::open(&builder).unwrap();
-    let mut ctx: client::Context = rtu::attach_slave(port, first_node);
 
-    // set_pyro_current_loop_drive(&mut ctx, 4.3).await?;
+    println!("Check IV ADC... ");
+    let mut ctx_iv_adc: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_IV_ADC));
+    let read_rsp: Vec<u16> = ctx_iv_adc.read_holding_registers(REG_NODEID_IV, 1).await??;
+    println!(" IV ADC Node ID: {:?}", read_rsp);
+    let read_rsp: Vec<u16> = ctx_iv_adc.read_holding_registers(REG_NODEID_IV_START, 4).await??;
+    println!(" First four IV ADC regs: {:?}", read_rsp);
+    println!("Disconnecting IV ADC");
+    ctx_iv_adc.disconnect().await?;
 
-    set_precision_current_drive(&mut ctx, 1.0).await?;
-    set_precision_current_drive(&mut ctx, 20.0).await?;
-    set_precision_current_drive(&mut ctx, 1.0).await?;
+    println!("Check Dual TK... ");
+    let mut ctx_dual_tk: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DUAL_TK));
+    let read_rsp: Vec<u16> = ctx_dual_tk.read_holding_registers(REG_NODEID_TK, 1).await??;
+    println!(" Dual TK node ID: {:?}", read_rsp);
 
-    // println!("Connecting first... ");
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(DEVICE_ADDRESS_REG, 3).await??;
-    // println!(" read_rsp: {:?}", read_rsp);
-    // const NEW_DEVICE_ADDR:u8 = NODEID_ADDR_IV_ADC;
-    // let w_resp = ctx.write_single_register(DEVICE_ADDRESS_REG, NEW_DEVICE_ADDR.into()).await?;
-    // println!(" w_resp: {:?}", w_resp);
+    // TODO use reg address consts
+    // example of reading all the dual TK registers:
+    let read_rsp: Vec<u16> = ctx_dual_tk.read_holding_registers(0x00, 2).await??;
+    println!(" read_rsp: {:?}", read_rsp);
 
-    // println!("Disconnecting first");
-    // ctx.disconnect().await?;
+    // let read_state = client.read_03(1, 0x10, 2).await;
+    let read_rsp: Vec<u16> = ctx_dual_tk.read_holding_registers(0x10, 2).await??;
+    println!(" read_rsp: {:?}", read_rsp);
 
-    // println!("Connecting second... ");
-    // let second_node: Slave = Slave(NEW_DEVICE_ADDR);
-    // let port = SerialStream::open(&builder).unwrap();
-    // let mut ctx = rtu::attach_slave(port, second_node);
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(DEVICE_ADDRESS_REG, 3).await??;
-    // println!(" read_rsp: {:?}", read_rsp);
+    // let read_cfg = client.read_03(1, 0x20, 3).await;
+    let read_rsp: Vec<u16> = ctx_dual_tk.read_holding_registers(0x20, 3).await??;
+    println!(" read_rsp: {:?}", read_rsp);
 
-    // ----- TODO example of reading all the IV ADC registers
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_ADDR_IV_START, 4).await??;
-    // println!(" read_rsp: {:?}", read_rsp);
+    println!("Disconnecting Dual TK");
+    ctx_dual_tk.disconnect().await?;
 
-    // // ----- TODO example of reading all the dual TK registers:
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(0x00, 2).await??;
-    // println!(" read_rsp: {:?}", read_rsp);
+    println!("Check Prec Curr Src... ");
+    let mut ctx_prec_curr: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT)); //NODEID_PREC_CURR_SRC)); // TODO this one isn't persisting its node ID
+    let read_rsp: Vec<u16> = ctx_prec_curr.read_holding_registers(REG_NODEID_PREC_CURR, 1).await??;
+    println!(" read_rsp: {:?}", read_rsp);
 
-    // // let read_state = client.read_03(1, 0x10, 2).await;
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(0x10, 2).await??;
-    // println!(" read_rsp: {:?}", read_rsp);
+    set_precision_current_drive(&mut ctx_prec_curr, 5.7).await?;
 
-    // // let read_cfg = client.read_03(1, 0x20, 3).await;
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(0x20, 3).await??;
-    // println!(" read_rsp: {:?}", read_rsp);
-    
-    // ----- TODO currently we're reading and writing the value of a 4-20 mA current loop controller
-    // let milliamp_reg_addr: u16 = 1;
-
-    // println!("Reading a sensor value");
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(milliamp_reg_addr, 1).await??;
-    // println!("read_rsp: {read_rsp:?}");
-    // let original_ma_val = read_rsp[0];
-
-    // let out_ma_setting = 80;
-    // println!("writing val of : {}", out_ma_setting);
-    // let w_rsp = ctx.write_single_register(milliamp_reg_addr, out_ma_setting).await?;
-    // println!("w_rsp: {w_rsp:?}");
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(milliamp_reg_addr, 1).await??;
-    // println!("new val read_rsp: {read_rsp:?}");
-
-    // sleep(Duration::from_millis(500)).await;
-
-    // let out_ma_setting = original_ma_val;
-    // println!("Resetting val of : {}", out_ma_setting);
-    // let w_rsp = ctx.write_single_register(milliamp_reg_addr, out_ma_setting).await?;
-    // println!("w_rsp: {w_rsp:?}");
-    // let read_rsp = ctx.read_holding_registers(milliamp_reg_addr, 1).await??;
-    // println!("read_rsp: {read_rsp:?}");
-    // ----- TODO
-
-
-    // println!("Disconnecting");
-    // ctx.disconnect().await?;
+    println!("Disconnecting Prec Curr Src");
+    ctx_prec_curr.disconnect().await?;
 
     Ok(())
 }
