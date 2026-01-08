@@ -6,6 +6,8 @@ use tokio::time::sleep;
 // use tokio_modbus::Result;
 // use tokio_modbus::client::Client;
 
+use tokio_modbus::prelude::*;
+
 use tokio_modbus::client::{Client, Reader, Writer};
 // use byteorder::{BigEndian, ByteOrder};
 
@@ -180,18 +182,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tty_path = "/dev/cu.usbserial-BG02SI88";
     let baud_rate = 9600;
 
+    // Via TCP server bridge (a Wifi bridge on our local network)
+    let socket_addr: std::net::SocketAddr = "10.0.1.151:502".parse()?;
+
+
     // Examples of setting the Modbus node ID for various devices -- need only be done once
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_IV, NODEID_DEFAULT, NODEID_IV_ADC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PREC_CURR, NODEID_DEFAULT, NODEID_PREC_CURR_SRC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_TK, NODEID_DEFAULT, NODEID_DUAL_TK).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PYRO_CURR_GEN, NODEID_DEFAULT, NODEID_PYRO_CURR_GEN).await?;
 
-    let builder = tokio_serial::new(tty_path, baud_rate);
-    // we first create a Context attached to the default Modbus node ID (1) which in theory should not be in use
-    // unless there's a fresh un-configured device attached to the bus
-    // let mut ctx: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
-    let mut ctx: client::Context = rtu::attach(SerialStream::open(&builder).unwrap());
+    // let builder: tokio_serial::SerialPortBuilder = tokio_serial::new(tty_path, baud_rate);
+    // let mut ctx: client::Context = rtu::attach(SerialStream::open(&builder).unwrap());
 
+    println!("Connecting to: '{socket_addr:?}'");
+    let mut ctx: client::Context = tcp::connect(socket_addr).await?;
+    
     let mut cur_target_milliamps = 1.0f32;
     loop { 
         println!("Check IV ADC... ");
@@ -246,7 +252,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         set_precision_current_drive(&mut ctx, cur_target_milliamps).await?;
         cur_target_milliamps += 1.0;
-        if cur_target_milliamps > 20.0 { cur_target_milliamps = 0.1; }
+        if cur_target_milliamps > 15.0 { cur_target_milliamps = 0.1; }
 
         // Let the bus & current settle before connecting to a different node
         sleep(Duration::from_millis(250)).await;
