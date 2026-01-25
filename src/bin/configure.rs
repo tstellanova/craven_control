@@ -7,53 +7,12 @@ use tokio_modbus::prelude::*;
 
 use tokio_modbus::client::{Client, Reader, Writer};
 use tokio_serial::SerialStream;
-// use byteorder::{BigEndian, ByteOrder};
 
     
-/// # Modbus node address assignments
-///
-/// | Address | Description |
-/// |-------|----------|
-/// | 0x01  | Reserved for Modbus default node ID |
-/// | 0x1F  | Current-Voltage 2 channel ADC   |
-/// | 0x2F  | Precision current source (0-1000 mA)   |
-/// | 0x3F  | Dual Type-K Thermocouple Reader |
-///
-/// 
-/// 
-
-/// Modbus node IDs
-const NODEID_DEFAULT: u8 = 0x01; // The Modbus node ID that most devices default to
-const NODEID_N4AIA04_ADC: u8 = 0x1E;
-const NODEID_IV_ADC: u8 = 0x1F;
-const NODEID_PREC_CURR_SRC: u8 = 0x2F;
-const NODEID_DUAL_TK: u8 = 0x3F;
-const NODEID_PYRO_SIM: u8 = 0x4A; // TODO switching to new current loop signal generator
-const NODEID_QUAD_RELAY: u8 = 0x5F; // TODO not yet programmed into relay board
-const NODEID_MAX: u8 = 0x7F;
-
-/// Register addresses
-const REG_NODEID_TK:u16 = 0x20; // dual Type-K thermocouple reader
-const REG_NODEID_IV:u16 = 0x40; // 0-10 Volt, 0-5 Amp IV ADC
-const REG_NODEID_N4AIA04:u16 = 0x0E; // N4AIA04 ADC with 0-20 mA and 5/10 Volt inputs
-const REG_NODEID_PREC_CURR:u16 = 0x00; // Precision current source YK-PVCCS0100/YK-PVCC1000
-const REG_NODEID_PYRO_SIM:u16 = 0x04; // TODO wrong? node ID may not be settable for Taidacent-B0B7HLZ6B4 
-const REG_NODEID_QUAD_RELAY:u16 =  0x00; //0x4000; // 0x00;
-
-const REG_SAVE_CFG_PREC_CURR:u16 = 0x02; // Cause YK-PVCCS to persist its parameters.
-const REG_IV_ADC_2CH_VALS: u16 = 0x00; // Where 2CH IV ADC stores read values
+use craven_control::*;
 
 
-/**
- *  Combine two u16 registers into an i32
- * 
- */ 
-fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
-    let high = registers[offset] as i32;
-    let low = registers[offset + 1] as i32;
-    let combined = (high << 16) | low;
-    combined
-}
+
 
 
 
@@ -152,7 +111,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_TK, NODEID_DEFAULT, NODEID_DUAL_TK).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PYRO_SIM, NODEID_DEFAULT, NODEID_PYRO_SIM).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4AIA04, NODEID_DEFAULT, NODEID_N4AIA04_ADC).await?;
-    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_QUAD_RELAY, 0x00, NODEID_QUAD_RELAY).await?;
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_QUAD_RELAY, 0x00, NODEID_QUAD_RELAY).await?;
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_QUAD_RELAY, 0x00, NODEID_QUAD_RELAY).await?;
+    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4VIA02, NODEID_DEFAULT, NODEID_N4VIA02_IV_ADC).await?;
+
     // the 3--4th byte of the transmitted frame represents the relay address,the relay 1-relay 8 address are respectively:
     // relay 0x0000,0x0001,0x0002,0x0003,0x0004,0x0005,0x0006,0x0007.
     // eg Turn on the relay no.2 (manual mode) Send: FF 05 00 01 FF 00 C8 24

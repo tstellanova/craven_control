@@ -3,6 +3,15 @@ name = "craven_control"
 version = "0.1.0"
 edition = "2024"
 
+
+[[bin]]
+name = "configure"
+path = "src/bin/configure.rs"
+
+[[bin]]
+name = "poll"
+path = "src/bin/poll.rs"
+
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
 tokio-serial = { version = "5.4"  }

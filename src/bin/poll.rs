@@ -12,43 +12,9 @@ use tokio_modbus::client::{Client, Reader, Writer};
 // use byteorder::{BigEndian, ByteOrder};
 
     
-/// # Modbus node address assignments
-///
-/// | Address | Description |
-/// |-------|----------|
-/// | 0x01  | Reserved for Modbus default node ID |
-/// | 0x1F  | Current-Voltage 2 channel ADC   |
-/// | 0x2F  | Precision current source (0-1000 mA)   |
-/// | 0x3F  | Dual Type-K Thermocouple Reader |
-///
-/// 
-/// 
-
-/// Modbus node IDs
-const NODEID_DEFAULT: u8 = 0x01; // The Modbus node ID that most devices default to
-const NODEID_IV_ADC: u8 = 0x1F;
-const NODEID_PREC_CURR_SRC: u8 = 0x2F;
-const NODEID_DUAL_TK: u8 = 0x3F;
-const NODEID_PYRO_CURR_GEN: u8 = 0x4F; // TODO switching to new current loop signal generator
-const NODEID_QUAD_RELAY: u8 = 0x5F; // TODO not yet programmed into relay board
-const NODEID_MAX: u8 = 0x7F;
-
-/// Register addresses
-const REG_NODEID_TK:u16 = 0x20; // dual Type-K thermocouple reader
-const REG_NODEID_IV:u16 = 0x40; // 0-10 Volt, 0-5 Amp IV ADC
-const REG_NODEID_PREC_CURR:u16 = 0x00; // Precision current source YK-PVCCS0100/YK-PVCC1000
-const REG_SAVE_CFG_PREC_CURR:u16 = 0x02; // Cause YK-PVCCS to persist its parameters.
-const REG_IV_ADC_2CH_VALS: u16 = 0x00; // Where 2CH IV ADC stores read values
-const REG_NODEID_PYRO_CURR_GEN:u16 = 0x04; // TODO wrong! node ID may not be settable for Taidacent-B0B7HLZ6B4 
+use craven_control::*;
 
 
-/// Combine two u16 registers into an i32
-fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
-    let high = registers[offset] as i32;
-    let low = registers[offset + 1] as i32;
-    let combined = (high << 16) | low;
-    combined
-}
 
 // /// Combine two u16 registers into am f32
 // fn registers_to_f32(registers: &[u16], offset: usize) -> f32 {
@@ -192,31 +158,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_TK, NODEID_DEFAULT, NODEID_DUAL_TK).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PYRO_CURR_GEN, NODEID_DEFAULT, NODEID_PYRO_CURR_GEN).await?;
 
-    // let builder: tokio_serial::SerialPortBuilder = tokio_serial::new(tty_path, baud_rate);
-    // let mut ctx: client::Context = rtu::attach(SerialStream::open(&builder).unwrap());
+    let builder: tokio_serial::SerialPortBuilder = tokio_serial::new(tty_path, baud_rate);
+    let mut ctx: client::Context = rtu::attach(SerialStream::open(&builder).unwrap());
 
-    println!("Connecting to: '{socket_addr:?}'");
-    let mut ctx: client::Context = tcp::connect(socket_addr).await?;
+    // println!("Connecting to: '{socket_addr:?}'");
+    // let mut ctx: client::Context = tcp::connect(socket_addr).await?;
     
     let mut cur_target_milliamps = 1.0f32;
     loop { 
         println!("Check IV ADC... ");
-        ctx.set_slave(Slave(NODEID_IV_ADC));
+        ctx.set_slave(Slave(NODEID_N4VIA02_IV_ADC)); //NODEID_IV_ADC));
         // let mut ctx_iv_adc: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_IV_ADC));
-        let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_IV, 3).await??;
-        println!(" IV_ADC CFG ({REG_NODEID_IV:?})[3]: {read_rsp:?}");
-        let iv_adc_vals: Vec<u16> = ctx.read_holding_registers(REG_IV_ADC_2CH_VALS, 4).await??;
-        println!(" IV_ADC VALS ({REG_IV_ADC_2CH_VALS:?})[4]: {iv_adc_vals:?}");
-        let ch1_value = registers_to_i32(&iv_adc_vals, 0);
-        let verified_volts = (ch1_value as f32) / 10000.0; // resolution is 0.1 mV for 10V range
-        let ch2_value = registers_to_i32(&iv_adc_vals, 2);
-        let verified_milliamps = (ch2_value as f32)/ 10.0; // resolution is 0.1 mA for 5A range
-        println!(" IV ADC ch1_value: {ch1_value:?} = {verified_volts:?} V");
-        println!(" IV ADC ch2_value: {ch2_value:?} = {verified_milliamps:?} mA");
+        let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_CFG_N4VIA02, 6).await??;
+        println!(" N4VIA02 CFG ({REG_NODEID_N4VIA02:?})[6]: {read_rsp:?}");
+        let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_N4VIA02, 1).await??;
+        println!(" N4VIA02 NODE ID ({REG_NODEID_N4VIA02:?})[1]: {read_rsp:?}");
+        let milliamp_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_CURR_VALS, 2).await??;
+        println!(" N4VIA02 mA VALS ({REG_N4VIA02_CURR_VALS:?})[2]: {milliamp_vals:?}");
+        let voltage_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_VOLT_VALS, 2).await??;
+        println!(" N4VIA02 V VALS ({REG_N4VIA02_VOLT_VALS:?})[2]: {voltage_vals:?}");
+        
+        let scaled_ch0_volts = (voltage_vals[0] as f32)/100.0;
+        println!(" scaled_ch0_volts: {scaled_ch0_volts:?}");
+
+        let ch1_milliamps = milliamp_vals[1];
+        println!(" ch1_milliamps: {ch1_milliamps:?}");
+
+        // let ch1_value = registers_to_i32(&iv_adc_vals, 0);
+        // let verified_volts = (ch1_value as f32) / 10000.0; // resolution is 0.1 mV for 10V range
+        // let ch2_value = registers_to_i32(&iv_adc_vals, 2);
+        // let verified_milliamps = (ch2_value as f32)/ 10.0; // resolution is 0.1 mA for 5A range
+        // println!(" IV ADC ch1_value: {ch1_value:?} = {verified_volts:?} V");
+        // println!(" IV ADC ch2_value: {ch2_value:?} = {verified_milliamps:?} mA");
 
         // Let the bus settle before connecting to a different node
-        sleep(Duration::from_millis(100)).await;
+        sleep(Duration::from_millis(1000)).await;
 
+        /* 
         println!("Check Dual TK... ");
         ctx.set_slave(Slave(NODEID_DUAL_TK));
         // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_TK, 1).await??;
@@ -256,6 +234,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Let the bus & current settle before connecting to a different node
         sleep(Duration::from_millis(250)).await;
+        */
 
         // TODO handle events that would lead to shutting down eg current source
     }
