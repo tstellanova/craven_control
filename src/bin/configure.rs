@@ -113,7 +113,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4AIA04, NODEID_DEFAULT, NODEID_N4AIA04_ADC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_QUAD_RELAY, 0x00, NODEID_QUAD_RELAY).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_QUAD_RELAY, 0x00, NODEID_QUAD_RELAY).await?;
-    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4VIA02, NODEID_DEFAULT, NODEID_N4VIA02_IV_ADC).await?;
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4VIA02, NODEID_DEFAULT, NODEID_N4VIA02_IV_ADC).await?;
+    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4IOA01_CURR_GEN, NODEID_DEFAULT, NODEID_N4IOA01_CURR_GEN).await?;
 
     // the 3--4th byte of the transmitted frame represents the relay address,the relay 1-relay 8 address are respectively:
     // relay 0x0000,0x0001,0x0002,0x0003,0x0004,0x0005,0x0006,0x0007.

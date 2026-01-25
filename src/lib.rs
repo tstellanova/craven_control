@@ -9,6 +9,7 @@
 /// | 0x2A  | Precision current source (0-1000 mA)   |
 /// | 0x2F  | Precision current source (0-100 mA)   |
 /// | 0x3F  | Dual Type-K Thermocouple Reader |
+/// | 0x4A  | 4-20mA current loop source |
 /// | 0x4F  | Pyrometer simulator (4-20mA source) |
 /// 
 ///
@@ -19,6 +20,7 @@ pub const NODEID_N4VIA02_IV_ADC: u8 = 0x1A;
 pub const NODEID_IV_ADC: u8 = 0x1F;
 pub const NODEID_PREC_CURR_SRC: u8 = 0x2F;
 pub const NODEID_DUAL_TK: u8 = 0x3F;
+pub const NODEID_N4IOA01_CURR_GEN: u8 = 0x4A; // 4-20 mA current loop source (signal generator)
 pub const NODEID_PYRO_CURR_GEN: u8 = 0x4F; // TODO switching to new current loop signal generator
 pub const NODEID_QUAD_RELAY: u8 = 0x5F; // TODO not yet programmed into relay board
 pub const NODEID_MAX: u8 = 0x7F;
@@ -33,9 +35,9 @@ pub const REG_SAVE_CFG_PREC_CURR:u16 = 0x02; // Cause YK-PVCCS to persist its pa
 pub const REG_IV_ADC_2CH_VALS: u16 = 0x00; // Where 2CH IV ADC stores read values
 pub const REG_N4VIA02_CURR_VALS: u16 = 0x00; // Where N4VIA02 stores two current values
 pub const REG_N4VIA02_VOLT_VALS: u16 = 0x20; // Where N4VIA02 stores two voltage values
-
+pub const REG_NODEID_N4IOA01_CURR_GEN: u16 = 0x0E; 
 pub const REG_NODEID_PYRO_CURR_GEN:u16 = 0x04; // TODO wrong! node ID may not be settable for Taidacent-B0B7HLZ6B4 
-
+pub const REG_N4IOA01_CURR_VAL: u16 = 0x00;
 
 /// Combine two u16 registers into an i32
 pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {

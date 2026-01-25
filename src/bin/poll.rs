@@ -30,19 +30,21 @@ use craven_control::*;
  * Set the pyro simulator current loop controller (4-20 mA) current value
  * We're currently using a Taidacent-B0B7HLZ6B4 4-20 mA signal generator
  */
-async fn set_pyro_current_loop_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<(), Box<dyn std::error::Error>> 
+async fn set_current_loop_drive(ctx: &mut tokio_modbus::client::Context, register: u16, milliamps: f32) -> Result<(), Box<dyn std::error::Error>> 
 {
-    const REG_ADDR_DRIVE_MILLIAMPS: u16  = 0x01;
-
     println!("Reading current loop value");
-    let read_rsp: Vec<u16> = ctx.read_holding_registers(0x00, 20).await??;
+    let read_rsp: Vec<u16> = ctx.read_holding_registers(register, 1).await??;
     println!("read_rsp: {read_rsp:?}");
+    sleep(Duration::from_millis(250)).await;
 
-    let out_ma_setting: u16 = (milliamps/0.1).round() as u16;
+    let out_ma_setting: u16 = (milliamps/0.01).round() as u16;
     println!("writing val of : {milliamps:?} mA  -> {out_ma_setting:?}");
-    ctx.write_single_register(REG_ADDR_DRIVE_MILLIAMPS, out_ma_setting).await??;
-    let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_ADDR_DRIVE_MILLIAMPS, 1).await??;
-    // println!("new val read_rsp: {read_rsp:?}");
+    ctx.write_single_register(register, out_ma_setting).await??;
+
+    sleep(Duration::from_millis(250)).await;
+    println!("Reading new current loop value");
+    let read_rsp: Vec<u16> = ctx.read_holding_registers(register, 1).await??;
+    println!("new val read_rsp: {read_rsp:?}");
 
     Ok(())
 }
@@ -164,25 +166,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // println!("Connecting to: '{socket_addr:?}'");
     // let mut ctx: client::Context = tcp::connect(socket_addr).await?;
     
-    let mut cur_target_milliamps = 1.0f32;
-    loop { 
-        println!("Check IV ADC... ");
-        ctx.set_slave(Slave(NODEID_N4VIA02_IV_ADC)); //NODEID_IV_ADC));
-        // let mut ctx_iv_adc: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_IV_ADC));
-        let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_CFG_N4VIA02, 6).await??;
-        println!(" N4VIA02 CFG ({REG_NODEID_N4VIA02:?})[6]: {read_rsp:?}");
-        let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_N4VIA02, 1).await??;
-        println!(" N4VIA02 NODE ID ({REG_NODEID_N4VIA02:?})[1]: {read_rsp:?}");
-        let milliamp_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_CURR_VALS, 2).await??;
-        println!(" N4VIA02 mA VALS ({REG_N4VIA02_CURR_VALS:?})[2]: {milliamp_vals:?}");
-        let voltage_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_VOLT_VALS, 2).await??;
-        println!(" N4VIA02 V VALS ({REG_N4VIA02_VOLT_VALS:?})[2]: {voltage_vals:?}");
-        
-        let scaled_ch0_volts = (voltage_vals[0] as f32)/100.0;
-        println!(" scaled_ch0_volts: {scaled_ch0_volts:?}");
+    ctx.set_slave(Slave(NODEID_N4IOA01_CURR_GEN)); 
 
-        let ch1_milliamps = milliamp_vals[1];
-        println!(" ch1_milliamps: {ch1_milliamps:?}");
+    let mut cur_target_milliamps = 4.0f32;
+    loop { 
+        set_current_loop_drive(&mut ctx, REG_N4IOA01_CURR_VAL, cur_target_milliamps).await?;
+
+        // println!("Check IV ADC... ");
+        // ctx.set_slave(Slave(NODEID_N4VIA02_IV_ADC)); //NODEID_IV_ADC));
+        // // let mut ctx_iv_adc: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_IV_ADC));
+        // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_CFG_N4VIA02, 6).await??;
+        // println!(" N4VIA02 CFG ({REG_NODEID_N4VIA02:?})[6]: {read_rsp:?}");
+        // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_N4VIA02, 1).await??;
+        // println!(" N4VIA02 NODE ID ({REG_NODEID_N4VIA02:?})[1]: {read_rsp:?}");
+        // let milliamp_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_CURR_VALS, 2).await??;
+        // println!(" N4VIA02 mA VALS ({REG_N4VIA02_CURR_VALS:?})[2]: {milliamp_vals:?}");
+        // let voltage_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_VOLT_VALS, 2).await??;
+        // println!(" N4VIA02 V VALS ({REG_N4VIA02_VOLT_VALS:?})[2]: {voltage_vals:?}");
+        
+        // let scaled_ch0_volts = (voltage_vals[0] as f32)/100.0;
+        // println!(" scaled_ch0_volts: {scaled_ch0_volts:?}");
+
+        // let ch1_milliamps = milliamp_vals[1];
+        // println!(" ch1_milliamps: {ch1_milliamps:?}");
 
         // let ch1_value = registers_to_i32(&iv_adc_vals, 0);
         // let verified_volts = (ch1_value as f32) / 10000.0; // resolution is 0.1 mV for 10V range
@@ -192,7 +198,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // println!(" IV ADC ch2_value: {ch2_value:?} = {verified_milliamps:?} mA");
 
         // Let the bus settle before connecting to a different node
-        sleep(Duration::from_millis(1000)).await;
+        // sleep(Duration::from_millis(1000)).await;
 
         /* 
         println!("Check Dual TK... ");
@@ -227,15 +233,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         println!("Check Prec Curr ... ");
         ctx.set_slave(Slave(NODEID_PREC_CURR_SRC)); 
-
         set_precision_current_drive(&mut ctx, cur_target_milliamps).await?;
-        cur_target_milliamps += 1.0;
-        if cur_target_milliamps > 15.0 { cur_target_milliamps = 0.1; }
+        */
+        cur_target_milliamps += 0.5;
+        if cur_target_milliamps > 20.0 { cur_target_milliamps = 4.0; }
 
         // Let the bus & current settle before connecting to a different node
-        sleep(Duration::from_millis(250)).await;
-        */
-
+        sleep(Duration::from_millis(1000)).await;
+        
         // TODO handle events that would lead to shutting down eg current source
     }
 
