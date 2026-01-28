@@ -1,6 +1,5 @@
 #![allow(unused)]
 
-use std::process::exit;
 use std::time::Duration;
 use tokio::time::sleep;
 // use tokio_modbus::client::Reader;
@@ -81,17 +80,62 @@ async fn set_precision_current_drive(ctx: &mut tokio_modbus::client::Context, mi
     Ok(())
 }
 
-
-
-
-
-async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
+async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32,  reg_node_id: u16, old_node_id: u8, new_node_id: u8) 
+    -> Result<(), Box<dyn std::error::Error>>
 {
-    ping_one_modbus_node_id(ctx, NODEID_DUAL_TK, REG_NODEID_TK).await?;
-    ping_one_modbus_node_id(ctx,NODEID_N4IOA01_CURR_GEN, REG_NODEID_N4IOA01).await?;
-    ping_one_modbus_node_id(ctx,NODEID_N4VIA02_IV_ADC, REG_NODEID_N4VIA02).await?;
-    ping_one_modbus_node_id(ctx,NODEID_PREC_CURR_SRC, REG_NODEID_PREC_CURR).await?;
-    ping_one_modbus_node_id(ctx, NODEID_IV_ADC, REG_NODEID_IV).await?;
+    let builder = tokio_serial::new(tty_path, baud_rate);
+    let first_node = tokio_modbus::Slave(old_node_id);
+    let port = tokio_serial::SerialStream::open(&builder).unwrap();
+    let mut ctx = tokio_modbus::prelude::rtu::attach_slave(port, first_node);
+
+    println!("Read existing node ID from node {old_node_id:?} first... ");
+    let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
+    println!("> read_rsp: {:?}", read_rsp);
+
+    let existing_node_id = read_rsp[0] as u8;
+    if existing_node_id != old_node_id {
+        if existing_node_id != new_node_id {
+            println!("Node ID {old_node_id:?} reports node ID of {existing_node_id:?}");
+            panic!("Couldn't verify the old node ID");
+        }
+    }
+ 
+    if existing_node_id == old_node_id {
+        println!("writing new node ID {new_node_id:?} to reg {reg_node_id:?}");
+        let w_resp = ctx.write_single_register(reg_node_id, new_node_id.into()).await?;
+        if w_resp.is_err() {
+            eprintln!("> w_resp: {:?}", w_resp);
+        }
+    }
+
+    println!("Disconnecting from old node id: {old_node_id:?}");
+    ctx.disconnect().await?;
+    
+    //Wait for device to reset, if necessary
+    sleep(Duration::from_millis(1000)).await;
+
+    println!("Connecting to new node id: {new_node_id:?}");
+    let second_node= tokio_modbus::Slave(new_node_id);
+    let port = tokio_serial::SerialStream::open(&builder).unwrap();
+    let mut ctx = tokio_modbus::prelude::rtu::attach_slave(port, second_node);
+    let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
+    println!("> read_rsp: {:?}", read_rsp);
+    let latest_node_id = read_rsp[0] as u8;
+    if latest_node_id != new_node_id {
+        eprintln!("latest_node_id {latest_node_id:?} != {new_node_id:?}");
+    }
+
+    if new_node_id == NODEID_PREC_CURR_SRC {
+        // flush the configuration parameter change to the node's persistent storage 
+        println!("persisting node configuration");
+        let flush_resp = ctx.write_single_register(REG_SAVE_CFG_PREC_CURR, 1).await?;
+        if flush_resp.is_err() {
+            eprintln!("> flush_resp: {:?}", flush_resp);
+        }
+    }
+
+    println!("Disconnecting from new node id: {new_node_id:?}");
+    ctx.disconnect().await?;
 
     Ok(())
 }
@@ -110,16 +154,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let socket_addr: std::net::SocketAddr = "10.0.1.151:502".parse()?;
 
 
-    // let builder: tokio_serial::SerialPortBuilder = tokio_serial::new(tty_path, baud_rate);
-    // let mut ctx: client::Context = rtu::attach(SerialStream::open(&builder).unwrap());
+    // Examples of setting the Modbus node ID for various devices -- need only be done once
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_IV, NODEID_DEFAULT, NODEID_IV_ADC).await?;
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PREC_CURR, NODEID_DEFAULT, NODEID_PREC_CURR_SRC).await?;
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_TK, NODEID_DEFAULT, NODEID_DUAL_TK).await?;
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PYRO_CURR_GEN, NODEID_DEFAULT, NODEID_PYRO_CURR_GEN).await?;
 
-    println!("Connecting to: '{socket_addr:?}'");
-    let mut ctx: client::Context = tcp::connect(socket_addr).await?;
+    let builder: tokio_serial::SerialPortBuilder = tokio_serial::new(tty_path, baud_rate);
+    let mut ctx: client::Context = rtu::attach(SerialStream::open(&builder).unwrap());
+
+    // println!("Connecting to: '{socket_addr:?}'");
+    // let mut ctx: client::Context = tcp::connect(socket_addr).await?;
     
-    enumerate_required_modules(&mut ctx).await?;
-
-    exit(0);
     ctx.set_slave(Slave(NODEID_N4IOA01_CURR_GEN)); 
+
     let mut cur_target_milliamps = 4.0f32;
     loop { 
         set_current_loop_drive(&mut ctx, REG_N4IOA01_CURR_VAL, cur_target_milliamps).await?;

@@ -1,4 +1,7 @@
 
+
+use tokio_modbus::prelude::*;
+
 /// # Modbus node address assignments
 ///
 /// | Address | Description |
@@ -35,7 +38,7 @@ pub const REG_SAVE_CFG_PREC_CURR:u16 = 0x02; // Cause YK-PVCCS to persist its pa
 pub const REG_IV_ADC_2CH_VALS: u16 = 0x00; // Where 2CH IV ADC stores read values
 pub const REG_N4VIA02_CURR_VALS: u16 = 0x00; // Where N4VIA02 stores two current values
 pub const REG_N4VIA02_VOLT_VALS: u16 = 0x20; // Where N4VIA02 stores two voltage values
-pub const REG_NODEID_N4IOA01_CURR_GEN: u16 = 0x0E; 
+pub const REG_NODEID_N4IOA01: u16 = 0x0E; 
 pub const REG_NODEID_PYRO_CURR_GEN:u16 = 0x04; // TODO wrong! node ID may not be settable for Taidacent-B0B7HLZ6B4 
 pub const REG_N4IOA01_CURR_VAL: u16 = 0x00;
 
@@ -45,4 +48,21 @@ pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
     let low = registers[offset + 1] as i32;
     let combined = (high << 16) | low;
     combined
+}
+
+pub async fn ping_one_modbus_node_id(ctx: &mut tokio_modbus::client::Context, node_id: u8,  reg_node_id: u16) 
+    -> Result<(), Box<dyn std::error::Error>>
+{
+    println!("Read existing node ID from node {node_id:X?}, reg 0x{node_id:X?} ... ");
+    ctx.set_slave(Slave(node_id));
+    let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
+    println!("> read_rsp: {:?}", read_rsp);
+
+    let existing_node_id = read_rsp[0] as u8;
+    if existing_node_id != node_id {
+        println!("Node ID {node_id:X?} reports node ID of {existing_node_id:X?}");
+        panic!("Couldn't verify the old node ID");
+    }
+
+    Ok(())
 }
