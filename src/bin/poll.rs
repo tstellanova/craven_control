@@ -91,7 +91,8 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     ping_one_modbus_node_id(ctx,NODEID_N4IOA01_CURR_GEN, REG_NODEID_N4IOA01).await?;
     ping_one_modbus_node_id(ctx,NODEID_N4VIA02_IV_ADC, REG_NODEID_N4VIA02).await?;
     ping_one_modbus_node_id(ctx,NODEID_PREC_CURR_SRC, REG_NODEID_PREC_CURR).await?;
-    ping_one_modbus_node_id(ctx, NODEID_IV_ADC, REG_NODEID_IV).await?;
+    // TODO this module has forgotten its programmed node ID
+    // ping_one_modbus_node_id(ctx, NODEID_IV_ADC, REG_NODEID_IV).await?;
 
     Ok(())
 }
@@ -109,32 +110,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Via TCP server bridge (a Wifi bridge on our local network)
     let socket_addr: std::net::SocketAddr = "10.0.1.151:502".parse()?;
 
-
-    // let builder: tokio_serial::SerialPortBuilder = tokio_serial::new(tty_path, baud_rate);
-    // let mut ctx: client::Context = rtu::attach(SerialStream::open(&builder).unwrap());
-
     println!("Connecting to: '{socket_addr:?}'");
     let mut ctx: client::Context = tcp::connect(socket_addr).await?;
-    
     enumerate_required_modules(&mut ctx).await?;
 
-    exit(0);
-    ctx.set_slave(Slave(NODEID_N4IOA01_CURR_GEN)); 
     let mut cur_target_milliamps = 4.0f32;
     loop { 
+        ctx.set_slave(Slave(NODEID_N4IOA01_CURR_GEN)); 
         set_current_loop_drive(&mut ctx, REG_N4IOA01_CURR_VAL, cur_target_milliamps).await?;
 
-        // println!("Check IV ADC... ");
-        // ctx.set_slave(Slave(NODEID_N4VIA02_IV_ADC)); //NODEID_IV_ADC));
-        // // let mut ctx_iv_adc: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_IV_ADC));
-        // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_CFG_N4VIA02, 6).await??;
-        // println!(" N4VIA02 CFG ({REG_NODEID_N4VIA02:?})[6]: {read_rsp:?}");
-        // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_N4VIA02, 1).await??;
-        // println!(" N4VIA02 NODE ID ({REG_NODEID_N4VIA02:?})[1]: {read_rsp:?}");
-        // let milliamp_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_CURR_VALS, 2).await??;
-        // println!(" N4VIA02 mA VALS ({REG_N4VIA02_CURR_VALS:?})[2]: {milliamp_vals:?}");
-        // let voltage_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_VOLT_VALS, 2).await??;
-        // println!(" N4VIA02 V VALS ({REG_N4VIA02_VOLT_VALS:?})[2]: {voltage_vals:?}");
+        println!("Check N4VIA02_IV... ");
+        ctx.set_slave(Slave(NODEID_N4VIA02_IV_ADC));
+        // let mut ctx_iv_adc: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_IV_ADC));
+        let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_CFG_N4VIA02, 6).await??;
+        println!(" N4VIA02 CFG ({REG_NODEID_N4VIA02:?})[6]: {read_rsp:?}");
+        let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_N4VIA02, 1).await??;
+        println!(" N4VIA02 NODE ID ({REG_NODEID_N4VIA02:?})[1]: {read_rsp:?}");
+        let milliamp_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_CURR_VALS, 2).await??;
+        println!(" N4VIA02 mA VALS ({REG_N4VIA02_CURR_VALS:?})[2]: {milliamp_vals:?}");
+        let voltage_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_VOLT_VALS, 2).await??;
+        println!(" N4VIA02 V VALS ({REG_N4VIA02_VOLT_VALS:?})[2]: {voltage_vals:?}");
         
         // let scaled_ch0_volts = (voltage_vals[0] as f32)/100.0;
         // println!(" scaled_ch0_volts: {scaled_ch0_volts:?}");
@@ -150,26 +145,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // println!(" IV ADC ch2_value: {ch2_value:?} = {verified_milliamps:?} mA");
 
         // Let the bus settle before connecting to a different node
-        // sleep(Duration::from_millis(1000)).await;
+        sleep(Duration::from_millis(500)).await;
 
-        /* 
+        
         println!("Check Dual TK... ");
         ctx.set_slave(Slave(NODEID_DUAL_TK));
-        // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_TK, 1).await??;
-        // println!(" Dual TK node ID: {:?}", read_rsp);
+        // move RTK check into a separate function
+        // let cfg_rsp: Vec<u16> = ctx.read_holding_registers(0x20, 3).await??;
+        // println!(" 0x20 cfg_rsp: {:?}", cfg_rsp);
 
-        let cfg_rsp: Vec<u16> = ctx.read_holding_registers(0x20, 3).await??;
-        println!(" 0x20 cfg_rsp: {:?}", cfg_rsp);
-
-        let ch_valid_rsp: Vec<u16> = ctx.read_holding_registers(0x10, 2).await??;
-        // println!(" 0x10 ch_valid_rsp: {:?}", ch_valid_rsp);
-        let ch1_tk_conn: bool = ch_valid_rsp[0] == 0; // 0: The thermocouple is connected, 1: The thermocouple is not connected
-        let ch2_tk_conn: bool = ch_valid_rsp[1] == 0;
+        let tk_valid_resp: Vec<u16> = ctx.read_holding_registers(REG_TK_VALIDITY, 2).await??;
+        println!("REG_TK_TEMP_VALS tk_valid_resp: {:?}", tk_valid_resp);
+        let ch1_tk_conn: bool = tk_valid_resp[0] == 0; // 0: The thermocouple is connected, 1: The thermocouple is not connected
+        let ch2_tk_conn: bool = tk_valid_resp[1] == 0;
 
         // TODO use reg address consts
         // example of reading all the dual TK registers:
-        let tk_resp: Vec<u16> = ctx.read_holding_registers(0x00, 2).await??;
-        // println!(" 0x00 temp_rsp: {:?}", tk_resp);
+        let tk_resp: Vec<u16> = ctx.read_holding_registers(REG_TK_TEMP_VALS, 2).await??;
+        println!(" REG_TK_TEMP_VALS tk_resp: {:?}", tk_resp);
         let ch1_tk_val: f32 = (tk_resp[0] as f32) / 10.0; // resolution is 0.1 °C
         let ch2_tk_val: f32 = (tk_resp[1] as f32) / 10.0; // resolution is 0.1 °C
 
@@ -186,7 +179,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Check Prec Curr ... ");
         ctx.set_slave(Slave(NODEID_PREC_CURR_SRC)); 
         set_precision_current_drive(&mut ctx, cur_target_milliamps).await?;
-        */
+        
         cur_target_milliamps += 1.0;
         if cur_target_milliamps > 20.0 { cur_target_milliamps = 0.0; }
 

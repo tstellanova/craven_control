@@ -41,6 +41,8 @@ pub const REG_N4VIA02_VOLT_VALS: u16 = 0x20; // Where N4VIA02 stores two voltage
 pub const REG_NODEID_N4IOA01: u16 = 0x0E; 
 pub const REG_NODEID_PYRO_CURR_GEN:u16 = 0x04; // TODO wrong! node ID may not be settable for Taidacent-B0B7HLZ6B4 
 pub const REG_N4IOA01_CURR_VAL: u16 = 0x00;
+pub const REG_TK_TEMP_VALS: u16 = 0x00; // The dual RTK's temperature values
+pub const REG_TK_VALIDITY: u16 = 0x10; // The dual RTK's thermocouple connection state
 
 /// Combine two u16 registers into an i32
 pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
