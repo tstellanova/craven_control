@@ -18,9 +18,10 @@ use tokio_modbus::prelude::*;
 ///
 
 /// Modbus node IDs
+pub const NODEID_BROADCAST_0: u8 = 0x00;
 pub const NODEID_DEFAULT: u8 = 0x01; // The Modbus node ID that most devices default to
 pub const NODEID_N4VIA02_IV_ADC: u8 = 0x1A; 
-pub const NODEID_IV_ADC: u8 = 0x1F;
+pub const NODEID_YKDAQ1402_IV_ADC: u8 = 0x1F;
 pub const NODEID_PREC_CURR_SRC: u8 = 0x2F;
 pub const NODEID_DUAL_TK: u8 = 0x3F;
 pub const NODEID_N4IOA01_CURR_GEN: u8 = 0x4A; // 4-20 mA current loop source (signal generator)
@@ -30,7 +31,7 @@ pub const NODEID_MAX: u8 = 0x7F;
 
 /// Register addresses
 pub const REG_NODEID_TK:u16 = 0x20; // dual Type-K thermocouple reader
-pub const REG_NODEID_IV:u16 = 0xFD; // 0-10 Volt, 0-5 Amp IV ADC
+pub const REG_NODEID_YKDAQ1402_IV_ADC:u16 = 64; // ELECDEMO YK-DAQ1402 0-10 Volt, 0-5 Amp IV ADC
 pub const REG_CFG_N4VIA02: u16 = 0xFA; // configuration params
 pub const REG_NODEID_N4VIA02: u16 = 0xFD; // 0-1 Amp ADC
 pub const REG_NODEID_PREC_CURR:u16 = 0x00; // Precision current source YK-PVCCS0100/YK-PVCC1000

@@ -91,8 +91,7 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     ping_one_modbus_node_id(ctx,NODEID_N4IOA01_CURR_GEN, REG_NODEID_N4IOA01).await?;
     ping_one_modbus_node_id(ctx,NODEID_N4VIA02_IV_ADC, REG_NODEID_N4VIA02).await?;
     ping_one_modbus_node_id(ctx,NODEID_PREC_CURR_SRC, REG_NODEID_PREC_CURR).await?;
-    // TODO this module has forgotten its programmed node ID
-    // ping_one_modbus_node_id(ctx, NODEID_IV_ADC, REG_NODEID_IV).await?;
+    ping_one_modbus_node_id(ctx, NODEID_YKDAQ1402_IV_ADC, REG_NODEID_YKDAQ1402_IV_ADC).await?;
 
     Ok(())
 }
