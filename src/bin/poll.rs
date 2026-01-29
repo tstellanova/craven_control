@@ -64,6 +64,23 @@ async fn read_multimeter(ctx: &mut tokio_modbus::client::Context)
     Ok(())
 }
 
+async fn read_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    // println!("Check N4VIA02_IV... ");
+    ctx.set_slave(Slave(NODEID_N4AIA04_IV_ADC));
+    // let mut ctx_iv_adc: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_IV_ADC));
+    // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_CFG_N4VIA02, 6).await??;
+    // println!(" N4VIA02 CFG ({REG_NODEID_N4VIA02:?})[6]: {read_rsp:?}");
+    // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_N4VIA02, 1).await??;
+    // println!(" N4VIA02 NODE ID ({REG_NODEID_N4VIA02:?})[1]: {read_rsp:?}");
+    let milliamp_vals: Vec<u16> = ctx.read_holding_registers(REG_N4AIA04_CH1_CURR, 2).await??;
+    println!(" N4AIA04  mA VALS ({REG_N4VIA02_CURR_VALS:?})[2]: {milliamp_vals:?}");
+    // let voltage_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_VOLT_VALS, 2).await??;
+    // println!(" N4VIA02 V VALS ({REG_N4VIA02_VOLT_VALS:?})[2]: {voltage_vals:?}");
+    Ok(())
+}
+
 /**
  * Read the voltage and current at active electrode pair.
  * 
@@ -156,10 +173,12 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
 {
     ping_one_modbus_node_id(ctx, NODEID_DUAL_TK, REG_NODEID_TK).await?;
     ping_one_modbus_node_id(ctx,NODEID_N4IOA01_CURR_GEN, REG_NODEID_N4IOA01).await?;
-    ping_one_modbus_node_id(ctx,NODEID_N4VIA02_IV_ADC, REG_NODEID_N4VIA02).await?;
+    // ping_one_modbus_node_id(ctx,NODEID_N4VIA02_IV_ADC, REG_NODEID_N4VIA02).await?;
     ping_one_modbus_node_id(ctx,NODEID_PREC_CURR_SRC, REG_NODEID_PREC_CURR).await?;
     ping_one_modbus_node_id(ctx, NODEID_YKDAQ1402_IV_ADC, REG_NODEID_YKDAQ1402_IV_ADC).await?;
+    ping_one_modbus_node_id(ctx,NODEID_N4AIA04_IV_ADC, REG_NODEID_N4AIA04).await?;
 
+    
     Ok(())
 }
 
@@ -184,8 +203,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop { 
         set_current_loop_drive(&mut ctx, cur_target_milliamps).await?;
         sleep(Duration::from_millis(250));
-        read_multimeter(&mut ctx).await?;
-
+        // read_multimeter(&mut ctx).await?;
+        read_420_iv_adc(&mut ctx).await?;
+        
         sleep(Duration::from_millis(500)).await;
         read_dual_tk_temps(&mut ctx).await?;
         

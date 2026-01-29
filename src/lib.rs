@@ -21,6 +21,7 @@ use tokio_modbus::prelude::*;
 pub const NODEID_BROADCAST_0: u8 = 0x00;
 pub const NODEID_DEFAULT: u8 = 0x01; // The Modbus node ID that most devices default to
 pub const NODEID_N4VIA02_IV_ADC: u8 = 0x1A; 
+pub const NODEID_N4AIA04_IV_ADC: u8 = 0x1E;
 pub const NODEID_YKDAQ1402_IV_ADC: u8 = 0x1F;
 pub const NODEID_PREC_CURR_SRC: u8 = 0x2F;
 pub const NODEID_DUAL_TK: u8 = 0x3F;
@@ -34,6 +35,7 @@ pub const REG_NODEID_TK:u16 = 0x20; // dual Type-K thermocouple reader
 pub const REG_NODEID_YKDAQ1402_IV_ADC:u16 = 64; // ELECDEMO YK-DAQ1402 0-10 Volt, 0-5 Amp IV ADC
 pub const REG_CFG_N4VIA02: u16 = 0xFA; // configuration params
 pub const REG_NODEID_N4VIA02: u16 = 0xFD; // 0-1 Amp ADC
+pub const REG_NODEID_N4AIA04: u16 = 0x0E; // 4-20 mA ADC
 pub const REG_NODEID_PREC_CURR:u16 = 0x00; // Precision current source YK-PVCCS0100/YK-PVCC1000
 pub const REG_SAVE_CFG_PREC_CURR:u16 = 0x02; // Cause YK-PVCCS to persist its parameters.
 pub const REG_IV_ADC_2CH_VALS: u16 = 0x00; // Where 2CH IV ADC stores read values
@@ -44,7 +46,7 @@ pub const REG_NODEID_PYRO_CURR_GEN:u16 = 0x04; // TODO wrong! node ID may not be
 pub const REG_N4IOA01_CURR_VAL: u16 = 0x00;
 pub const REG_TK_TEMP_VALS: u16 = 0x00; // The dual RTK's temperature values
 pub const REG_TK_VALIDITY: u16 = 0x10; // The dual RTK's thermocouple connection state
-
+pub const REG_N4AIA04_CH1_CURR: u16 = 0x0002;
 
 
 // /// Combine two u16 registers into amn f32
@@ -68,7 +70,7 @@ pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
 pub async fn ping_one_modbus_node_id(ctx: &mut tokio_modbus::client::Context, node_id: u8,  reg_node_id: u16) 
     -> Result<(), Box<dyn std::error::Error>>
 {
-    println!("Read existing node ID from node {node_id:X?}, reg 0x{node_id:X?} ... ");
+    println!("Read existing node ID from node {node_id:X?}, reg 0x{reg_node_id:X?} ... ");
     ctx.set_slave(Slave(node_id));
     let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
     println!("> read_rsp: {:?}", read_rsp);
