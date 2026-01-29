@@ -45,6 +45,18 @@ pub const REG_N4IOA01_CURR_VAL: u16 = 0x00;
 pub const REG_TK_TEMP_VALS: u16 = 0x00; // The dual RTK's temperature values
 pub const REG_TK_VALIDITY: u16 = 0x10; // The dual RTK's thermocouple connection state
 
+
+
+// /// Combine two u16 registers into amn f32
+// fn registers_to_f32(registers: &[u16], offset: usize) -> f32 {
+//     let high = registers[offset] as u32;
+//     let low = registers[offset + 1] as u32;
+//     let combined = (high << 16) | low;
+    
+//     // Convert u32 to f32
+//     f32::from_bits(combined)
+// }
+
 /// Combine two u16 registers into an i32
 pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
     let high = registers[offset] as i32;
