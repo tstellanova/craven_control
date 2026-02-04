@@ -16,5 +16,6 @@ path = "src/bin/poll.rs"
 tokio = { version = "1.0", features = ["full"] }
 tokio-serial = { version = "5.4"  }
 tokio-modbus = "0.17.0"
+chrono = "0.4.43"
 # byteorder = "1.5"
 

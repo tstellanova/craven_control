@@ -200,7 +200,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ctx: client::Context = tcp::connect(socket_addr).await?;
     enumerate_required_modules(&mut ctx).await?;
 
-    // let celsius_per_milliamp: f32 = 1000.0 / (20.0 - 4.0)
+    let start_time = chrono::Utc::now().timestamp();
+    let log_out_path = format!("{}_recorder.csv",start_time);
+    println!("Recording data to {log_out_path:?} ...");
+    let logfile = File::create(format!("{}_recorder.csv",start_time))?;
+    let mut csv_writer = BufWriter::new(logfile);
+
+    writeln!(csv_writer, "timestamp,TK1_C,pyro_mA,420_out_mA")?;
+
     let milliamps_per_celsius:f32 = (20.0 - 4.0)/1000.0; //TODO check correctness of this
     let mut cur_core_temperature = 20.0f32;
     let mut cur_target_milliamps = 4.0f32;
@@ -218,10 +225,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         sleep(Duration::from_millis(250)).await;
         set_current_loop_drive(&mut ctx, cur_target_milliamps).await?;
 
-        sleep(Duration::from_millis(500)).await;
+        sleep(Duration::from_millis(250)).await;
         let current_loop_ma = read_420_iv_adc(&mut ctx).await?;
         println!("drive {current_loop_ma:?} mA");
 
+        let timestamp = chrono::Utc::now().timestamp();
+        writeln!(
+            csv_writer,
+            "{},{},{},{}",
+            timestamp,
+            cur_core_temperature,
+            pyro_milliamps,
+            current_loop_ma
+        )?;
+
+        csv_writer.flush()?;
         // TODO handle events that would lead to shutting down eg current source
     }
 
