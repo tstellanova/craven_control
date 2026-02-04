@@ -60,7 +60,7 @@ async fn read_multimeter(ctx: &mut tokio_modbus::client::Context)
 }
 
 async fn read_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
--> Result<(), Box<dyn std::error::Error>> 
+-> Result<(f32), Box<dyn std::error::Error>> 
 {
     // println!("Check N4VIA02_IV... ");
     ctx.set_slave(Slave(NODEID_N4AIA04_IV_ADC));
@@ -70,18 +70,19 @@ async fn read_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
     // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_N4VIA02, 1).await??;
     // println!(" N4VIA02 NODE ID ({REG_NODEID_N4VIA02:?})[1]: {read_rsp:?}");
     let milliamp_vals: Vec<u16> = ctx.read_holding_registers(REG_N4AIA04_CH1_CURR, 2).await??;
-    println!(" N4AIA04  mA VALS ({REG_N4VIA02_CURR_VALS:?})[2]: {milliamp_vals:?}");
+    // println!(" N4AIA04  mA VALS ({REG_N4VIA02_CURR_VALS:?})[2]: {milliamp_vals:?}");
+    let ch1_milliamps = (milliamp_vals[0] as f32)/10.0;
     // let voltage_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_VOLT_VALS, 2).await??;
     // println!(" N4VIA02 V VALS ({REG_N4VIA02_VOLT_VALS:?})[2]: {voltage_vals:?}");
-    Ok(())
+    Ok((ch1_milliamps))
 }
 
 /**
  * Read the voltage and current at active electrode pair.
  * 
  */
-async fn read_electrode_pair_iv(ctx: &mut tokio_modbus::client::Context)
--> Result<(), Box<dyn std::error::Error>> 
+async fn read_precision_iv_adc(ctx: &mut tokio_modbus::client::Context)
+-> Result<(f32, f32), Box<dyn std::error::Error>> 
 {
     ctx.set_slave(Slave(NODEID_YKDAQ1402_IV_ADC));
     // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_YKDAQ1402_IV_ADC, 3).await??;
@@ -93,9 +94,9 @@ async fn read_electrode_pair_iv(ctx: &mut tokio_modbus::client::Context)
     let ch2_value = registers_to_i32(&iv_adc_vals, 2);
     let verified_milliamps = (ch2_value as f32)/ 10.0; // resolution is 0.1 mA for 5A range
 
-    println!(" YKDAQ1402 ch1_value: {ch1_value:?} = {verified_volts:?} V");
-    println!(" YKDAQ1402 ch2_value: {ch2_value:?} = {verified_milliamps:?} mA");
-    Ok(())
+    // println!(" YKDAQ1402 ch1_value: {ch1_value:?} = {verified_volts:?} V");
+    // println!(" YKDAQ1402 ch2_value: {ch2_value:?} = {verified_milliamps:?} mA");
+    Ok((verified_volts, verified_milliamps))
 }
 
 
@@ -116,11 +117,11 @@ async fn set_current_loop_drive(ctx: &mut tokio_modbus::client::Context,  millia
     // println!("writing val of : {milliamps:?} mA  -> {out_ma_setting:?}");
     ctx.write_single_register(REG_N4IOA01_CURR_VAL, out_ma_setting).await??;
 
-    sleep(Duration::from_millis(500)).await;
+    // sleep(Duration::from_millis(500)).await;
     // println!("Reading new current loop value");
     // let new_set: Vec<u16> = ctx.read_holding_registers(REG_N4IOA01_CURR_VAL, 1).await??;
     // println!("420 src values: {read_rsp:?}");
-    println!(" 420src old: {old_set:?} new: {out_ma_setting:?} ");
+    // println!(" 420src old: {old_set:?} new: {out_ma_setting:?} ");
     Ok(())
 }
 
@@ -166,12 +167,18 @@ async fn set_precision_current_drive(ctx: &mut tokio_modbus::client::Context, mi
  */
 async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
 {
+    // measures Type K thermocouple signal
     ping_one_modbus_node_id(ctx, NODEID_DUAL_TK, REG_NODEID_TK).await?;
+    // 420 current loop source (simulates pyrometer)
     ping_one_modbus_node_id(ctx,NODEID_N4IOA01_CURR_GEN, REG_NODEID_N4IOA01).await?;
+    // 420 current loop ammeter (verifies pyrometer simulation signal)
+    ping_one_modbus_node_id(ctx,NODEID_N4AIA04_IV_ADC, REG_NODEID_N4AIA04).await?;
+
     // ping_one_modbus_node_id(ctx,NODEID_N4VIA02_IV_ADC, REG_NODEID_N4VIA02).await?;
     // ping_one_modbus_node_id(ctx,NODEID_PREC_CURR_SRC, REG_NODEID_PREC_CURR).await?;
-    // ping_one_modbus_node_id(ctx, NODEID_YKDAQ1402_IV_ADC, REG_NODEID_YKDAQ1402_IV_ADC).await?;
-    ping_one_modbus_node_id(ctx,NODEID_N4AIA04_IV_ADC, REG_NODEID_N4AIA04).await?;
+
+    // measures actual pyrometer current with higher precision
+    ping_one_modbus_node_id(ctx, NODEID_YKDAQ1402_IV_ADC, REG_NODEID_YKDAQ1402_IV_ADC).await?;
 
     Ok(())
 }
@@ -203,15 +210,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cur_core_temperature = ch1_tk_opt.unwrap_or(ch2_tk_opt.unwrap_or(1000.0));
         println!("TK {cur_core_temperature:?}°C");
 
+        sleep(Duration::from_millis(250)).await;
+        let (pyro_volts, pyro_milliamps) = read_precision_iv_adc(&mut ctx).await?;
+        println!("pyrom {pyro_volts:?} V, {pyro_milliamps:?} mA");
+
         cur_target_milliamps = 4.0 + milliamps_per_celsius * cur_core_temperature;
         sleep(Duration::from_millis(250)).await;
         set_current_loop_drive(&mut ctx, cur_target_milliamps).await?;
 
         sleep(Duration::from_millis(500)).await;
-        read_420_iv_adc(&mut ctx).await?;
-        
-        sleep(Duration::from_millis(500)).await;
-        read_dual_tk_temps(&mut ctx).await?;
+        let current_loop_ma = read_420_iv_adc(&mut ctx).await?;
+        println!("drive {current_loop_ma:?} mA");
 
         // TODO handle events that would lead to shutting down eg current source
     }

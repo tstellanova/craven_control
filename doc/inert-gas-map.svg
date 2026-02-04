@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:dc="http://purl.org/dc/elements/1.1/" version="1.1" xmlns:xl="http://www.w3.org/1999/xlink" viewBox="410 58 714 792" width="714" height="792">
+  <defs>
+    <marker orient="auto" overflow="visible" markerUnits="strokeWidth" id="FilledArrow_Marker" stroke-linejoin="miter" stroke-miterlimit="10" viewBox="-5 -3 6 6" markerWidth="6" markerHeight="6" color="black">
+      <g>
+        <path d="M -3.2 0 L 0 1.2 L 0 -1.2 Z" fill="currentColor" stroke="currentColor" stroke-width="1"/>
+      </g>
+    </marker>
+    <linearGradient x1="0" x2="1" id="Gradient" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c0c0ff"/>
+      <stop offset="1" stop-color="#333"/>
+    </linearGradient>
+    <linearGradient id="Obj_Gradient" xl:href="#Gradient" gradientTransform="translate(472.8125 285.55078) rotate(90) scale(60)"/>
+    <linearGradient id="Obj_Gradient_2" xl:href="#Gradient" gradientTransform="translate(472.8125 231.60938) rotate(90) scale(53.941406)"/>
+    <linearGradient id="Obj_Gradient_3" xl:href="#Gradient" gradientTransform="translate(472.8125 192.66797) rotate(90) scale(38.941406)"/>
+    <radialGradient cx="0" cy="0" r="1" id="Gradient_2" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="white"/>
+      <stop offset="1" stop-color="#333"/>
+    </radialGradient>
+    <radialGradient id="Obj_Gradient_4" xl:href="#Gradient_2" gradientTransform="translate(503.21616 112.18349) scale(43.330524)"/>
+    <marker orient="auto" overflow="visible" markerUnits="strokeWidth" id="FilledArrow_Marker_2" stroke-linejoin="miter" stroke-miterlimit="10" viewBox="-1 -3 6 6" markerWidth="6" markerHeight="6" color="black">
+      <g>
+        <path d="M 3.2 0 L 0 -1.2 L 0 1.2 Z" fill="currentColor" stroke="currentColor" stroke-width="1"/>
+      </g>
+    </marker>
+    <filter id="Shadow" filterUnits="userSpaceOnUse" x="338.6" y="-21.2">
+      <feGaussianBlur in="SourceAlpha" result="blur" stdDeviation="1.308"/>
+      <feOffset in="blur" result="offset" dx="0" dy="2"/>
+      <feFlood flood-color="black" flood-opacity=".5" result="flood"/>
+      <feComposite in="flood" in2="offset" operator="in" result="color"/>
+      <feMerge>
+        <feMergeNode in="color"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="Obj_Gradient_5" xl:href="#Gradient" gradientTransform="translate(633.3759 583.845) rotate(90) scale(37)"/>
+    <linearGradient id="Obj_Gradient_6" xl:href="#Gradient" gradientTransform="translate(664.3759 585.983) rotate(90) scale(32.724)"/>
+    <linearGradient id="Obj_Gradient_7" xl:href="#Gradient" gradientTransform="translate(628.9043 734.3763) rotate(90) scale(28.447998)"/>
+    <linearGradient id="Obj_Gradient_8" xl:href="#Gradient" gradientTransform="translate(659.4181 727.7279) rotate(90) scale(41.74475)"/>
+  </defs>
+  <g id="Canvas_1" stroke-dasharray="none" stroke-opacity="1" stroke="none" fill="none" fill-opacity="1">
+    <title>Canvas 1</title>
+    <rect fill="white" x="410" y="58" width="714" height="792"/>
+    <g id="Canvas_1_Layer_1">
+      <title>Layer 1</title>
+      <g id="Graphic_63">
+        <path d="M 414.32694 59 L 1120.327 59 C 1121.9838 59 1123.327 60.343146 1123.327 62 L 1123.327 518 C 1123.327 519.65685 1121.9838 521 1120.327 521 L 414.32694 521 C 412.6701 521 411.32694 519.65685 411.32694 518 L 411.32694 62 C 411.32694 60.343146 412.6701 59 414.32694 59 Z" fill="#d5fc79" fill-opacity=".50406147"/>
+        <path d="M 414.32694 59 L 1120.327 59 C 1121.9838 59 1123.327 60.343146 1123.327 62 L 1123.327 518 C 1123.327 519.65685 1121.9838 521 1120.327 521 L 414.32694 521 C 412.6701 521 411.32694 519.65685 411.32694 518 L 411.32694 62 C 411.32694 60.343146 412.6701 59 414.32694 59 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_62">
+        <path d="M 414.32694 531.07935 L 1120.327 531.07935 C 1121.9838 531.07935 1123.327 532.4225 1123.327 534.07935 L 1123.327 846.0793 C 1123.327 847.7362 1121.9838 849.0793 1120.327 849.0793 L 414.32694 849.0793 C 412.6701 849.0793 411.32694 847.7362 411.32694 846.0793 L 411.32694 534.07935 C 411.32694 532.4225 412.6701 531.07935 414.32694 531.07935 Z" fill="#e3e3e3"/>
+        <path d="M 414.32694 531.07935 L 1120.327 531.07935 C 1121.9838 531.07935 1123.327 532.4225 1123.327 534.07935 L 1123.327 846.0793 C 1123.327 847.7362 1121.9838 849.0793 1120.327 849.0793 L 414.32694 849.0793 C 412.6701 849.0793 411.32694 847.7362 411.32694 846.0793 L 411.32694 534.07935 C 411.32694 532.4225 412.6701 531.07935 414.32694 531.07935 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_2">
+        <path d="M 758.9852 69.39638 L 869.4492 69.39638 C 873.8675 69.39638 877.4492 72.9781 877.4492 77.39638 L 877.4492 146.9706 C 877.4492 151.38887 873.8675 154.9706 869.4492 154.9706 L 758.9852 154.9706 C 754.5669 154.9706 750.9852 151.38887 750.9852 146.9706 L 750.9852 77.39638 C 750.9852 72.9781 754.5669 69.39638 758.9852 69.39638 Z" fill="white"/>
+        <path d="M 758.9852 69.39638 L 869.4492 69.39638 C 873.8675 69.39638 877.4492 72.9781 877.4492 77.39638 L 877.4492 146.9706 C 877.4492 151.38887 873.8675 154.9706 869.4492 154.9706 L 758.9852 154.9706 C 754.5669 154.9706 750.9852 151.38887 750.9852 146.9706 L 750.9852 77.39638 C 750.9852 72.9781 754.5669 69.39638 758.9852 69.39638 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(755.9852 93.73549)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="23.567998" y="15" xml:space="preserve">Regulator </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="18.215998" y="33.448" xml:space="preserve">Subsystem</tspan>
+        </text>
+      </g>
+      <g id="Graphic_5">
+        <path d="M 967.06 138 L 1060.304 138 C 1063.0654 138 1065.304 140.23858 1065.304 143 L 1065.304 501 C 1065.304 503.7614 1063.0654 506 1060.304 506 L 967.06 506 C 964.2986 506 962.06 503.7614 962.06 501 L 962.06 143 C 962.06 140.23858 964.2986 138 967.06 138 Z" fill="white"/>
+        <path d="M 967.06 138 L 1060.304 138 C 1063.0654 138 1065.304 140.23858 1065.304 143 L 1065.304 501 C 1065.304 503.7614 1063.0654 506 1060.304 506 L 967.06 506 C 964.2986 506 962.06 503.7614 962.06 501 L 962.06 143 C 962.06 140.23858 964.2986 138 967.06 138 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(967.06 303.552)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="19.950002" y="15" xml:space="preserve">Ar Tank </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="20.686002" y="33.448" xml:space="preserve">125 CF</tspan>
+        </text>
+      </g>
+      <g id="Line_6">
+        <path d="M 896.3492 112.18349 L 904.3492 112.18349 L 927.1172 111.89062 L 1013.682 111.89062 L 1013.682 138" marker-start="url(#FilledArrow_Marker)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
+      </g>
+      <g id="Graphic_7">
+        <text transform="translate(949.328 80.90625)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="0" y="15" xml:space="preserve">CGA-580 MNPT</tspan>
+        </text>
+      </g>
+      <g id="Graphic_8">
+        <path d="M 450.5625 285.55078 L 495.0625 285.55078 C 497.8239 285.55078 500.0625 287.78936 500.0625 290.55078 L 500.0625 340.5508 C 500.0625 343.3122 497.8239 345.5508 495.0625 345.5508 L 450.5625 345.5508 C 447.8011 345.5508 445.5625 343.3122 445.5625 340.5508 L 445.5625 290.55078 C 445.5625 287.78936 447.8011 285.55078 450.5625 285.55078 Z" fill="url(#Obj_Gradient)"/>
+        <path d="M 450.5625 285.55078 L 495.0625 285.55078 C 497.8239 285.55078 500.0625 287.78936 500.0625 290.55078 L 500.0625 340.5508 C 500.0625 343.3122 497.8239 345.5508 495.0625 345.5508 L 450.5625 345.5508 C 447.8011 345.5508 445.5625 343.3122 445.5625 340.5508 L 445.5625 290.55078 C 445.5625 287.78936 447.8011 285.55078 450.5625 285.55078 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Group_28">
+        <g id="Graphic_10">
+          <path d="M 450.5625 231.60938 L 495.0625 231.60938 C 497.8239 231.60938 500.0625 233.84795 500.0625 236.60938 L 500.0625 280.55078 C 500.0625 283.3122 497.8239 285.55078 495.0625 285.55078 L 450.5625 285.55078 C 447.8011 285.55078 445.5625 283.3122 445.5625 280.55078 L 445.5625 236.60938 C 445.5625 233.84795 447.8011 231.60938 450.5625 231.60938 Z" fill="url(#Obj_Gradient_2)"/>
+          <path d="M 450.5625 231.60938 L 495.0625 231.60938 C 497.8239 231.60938 500.0625 233.84795 500.0625 236.60938 L 500.0625 280.55078 C 500.0625 283.3122 497.8239 285.55078 495.0625 285.55078 L 450.5625 285.55078 C 447.8011 285.55078 445.5625 283.3122 445.5625 280.55078 L 445.5625 236.60938 C 445.5625 233.84795 447.8011 231.60938 450.5625 231.60938 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        </g>
+        <g id="Graphic_11">
+          <path d="M 453.9375 192.66797 L 491.6875 192.66797 C 494.4489 192.66797 496.6875 194.90655 496.6875 197.66797 L 496.6875 226.60938 C 496.6875 229.3708 494.4489 231.60938 491.6875 231.60938 L 453.9375 231.60938 C 451.1761 231.60938 448.9375 229.3708 448.9375 226.60938 L 448.9375 197.66797 C 448.9375 194.90655 451.1761 192.66797 453.9375 192.66797 Z" fill="url(#Obj_Gradient_3)"/>
+          <path d="M 453.9375 192.66797 L 491.6875 192.66797 C 494.4489 192.66797 496.6875 194.90655 496.6875 197.66797 L 496.6875 226.60938 C 496.6875 229.3708 494.4489 231.60938 491.6875 231.60938 L 453.9375 231.60938 C 451.1761 231.60938 448.9375 229.3708 448.9375 226.60938 L 448.9375 197.66797 C 448.9375 194.90655 451.1761 192.66797 453.9375 192.66797 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        </g>
+      </g>
+      <g id="Graphic_12">
+        <text transform="translate(511.71043 389.58934)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="58264504e-20" y="15" xml:space="preserve">M8 hollow bolt</tspan>
+        </text>
+      </g>
+      <g id="Graphic_13">
+        <text transform="translate(529.0374 306.3268)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="32684966e-20" y="15" xml:space="preserve">F-M8 &gt;1/8 MNPT</tspan>
+        </text>
+      </g>
+      <g id="Graphic_14">
+        <text transform="translate(528.10937 229.88538)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="0" y="15" xml:space="preserve">Swagelok 1/8 SS</tspan>
+        </text>
+      </g>
+      <g id="Graphic_23">
+        <text transform="translate(552.0381 76.57422)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="0" y="15" xml:space="preserve">1/8 SS304 capillary tube</tspan>
+        </text>
+      </g>
+      <g id="Graphic_24">
+        <path d="M 469.3028 133.76005 L 469.3028 90.60692 C 469.3028 87.62936 484.496 85.21278 503.21616 85.21278 C 521.93634 85.21278 537.1295 87.62936 537.1295 90.60692 L 537.1295 133.76005 C 537.1295 136.73761 521.93634 139.15419 503.21616 139.15419 C 484.496 139.15419 469.3028 136.73761 469.3028 133.76005" fill="url(#Obj_Gradient_4)"/>
+        <path d="M 469.3028 133.76005 L 469.3028 90.60692 C 469.3028 87.62936 484.496 85.21278 503.21616 85.21278 C 521.93634 85.21278 537.1295 87.62936 537.1295 90.60692 L 537.1295 133.76005 C 537.1295 136.73761 521.93634 139.15419 503.21616 139.15419 C 484.496 139.15419 469.3028 136.73761 469.3028 133.76005 M 469.3028 90.60692 C 469.3028 93.58449 484.496 96.00106 503.21616 96.00106 C 521.93634 96.00106 537.1295 93.58449 537.1295 90.60692" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_25">
+        <text transform="translate(511.71043 144.15419)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="8526513e-19" y="15" xml:space="preserve">Relief coil</tspan>
+        </text>
+      </g>
+      <g id="Line_26">
+        <line x1="750.9852" y1="112.18349" x2="551.8295" y2="112.18349" marker-end="url(#FilledArrow_Marker_2)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
+      </g>
+      <g id="Line_27">
+        <path d="M 473.00306 136.21145 L 473.00306 149.21145 L 472.9078 164.4397 L 472.8125 169.96797 L 472.8125 177.96797" marker-end="url(#FilledArrow_Marker_2)" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
+      </g>
+      <g id="Group_30">
+        <g id="Graphic_9" filter="url(#Shadow)">
+          <path d="M 462.8125 345.5508 L 482.8125 345.5508 C 485.5739 345.5508 487.8125 347.78936 487.8125 350.5508 L 487.8125 468.5508 C 487.8125 471.3122 485.5739 473.5508 482.8125 473.5508 L 462.8125 473.5508 C 460.0511 473.5508 457.8125 471.3122 457.8125 468.5508 L 457.8125 350.5508 C 457.8125 347.78936 460.0511 345.5508 462.8125 345.5508 Z" fill="#ebebeb"/>
+          <path d="M 462.8125 345.5508 L 482.8125 345.5508 C 485.5739 345.5508 487.8125 347.78936 487.8125 350.5508 L 487.8125 468.5508 C 487.8125 471.3122 485.5739 473.5508 482.8125 473.5508 L 462.8125 473.5508 C 460.0511 473.5508 457.8125 471.3122 457.8125 468.5508 L 457.8125 350.5508 C 457.8125 347.78936 460.0511 345.5508 462.8125 345.5508 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        </g>
+        <g id="Graphic_29">
+          <path d="M 440.89915 470 L 504.72585 470 C 505.8304 470 506.72585 470.89543 506.72585 472 L 506.72585 504 C 506.72585 505.10457 505.8304 506 504.72585 506 L 440.89915 506 C 439.7946 506 438.89915 505.10457 438.89915 504 L 438.89915 472 C 438.89915 470.89543 439.7946 470 440.89915 470 Z" fill="#ebebeb"/>
+          <path d="M 440.89915 470 L 504.72585 470 C 505.8304 470 506.72585 470.89543 506.72585 472 L 506.72585 504 C 506.72585 505.10457 505.8304 506 504.72585 506 L 440.89915 506 C 439.7946 506 438.89915 505.10457 438.89915 504 L 438.89915 472 C 438.89915 470.89543 439.7946 470 440.89915 470 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        </g>
+      </g>
+      <g id="Graphic_32">
+        <path d="M 552.9327 573.845 L 614.7594 573.845 C 616.41626 573.845 617.7594 575.18816 617.7594 576.845 L 617.7594 767.845 C 617.7594 769.5019 616.41626 770.845 614.7594 770.845 L 552.9327 770.845 C 551.27584 770.845 549.9327 769.5019 549.9327 767.845 L 549.9327 576.845 C 549.9327 575.18816 551.27584 573.845 552.9327 573.845 Z" fill="white"/>
+        <path d="M 552.9327 573.845 L 614.7594 573.845 C 616.41626 573.845 617.7594 575.18816 617.7594 576.845 L 617.7594 767.845 C 617.7594 769.5019 616.41626 770.845 614.7594 770.845 L 552.9327 770.845 C 551.27584 770.845 549.9327 769.5019 549.9327 767.845 L 549.9327 576.845 C 549.9327 575.18816 551.27584 573.845 552.9327 573.845 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Group_49">
+        <g id="Graphic_33">
+          <path d="M 620.8759 583.845 L 645.8759 583.845 C 647.5328 583.845 648.8759 585.18816 648.8759 586.845 L 648.8759 617.845 C 648.8759 619.5019 647.5328 620.845 645.8759 620.845 L 620.8759 620.845 C 619.21906 620.845 617.8759 619.5019 617.8759 617.845 L 617.8759 586.845 C 617.8759 585.18816 619.21906 583.845 620.8759 583.845 Z" fill="url(#Obj_Gradient_5)"/>
+          <path d="M 620.8759 583.845 L 645.8759 583.845 C 647.5328 583.845 648.8759 585.18816 648.8759 586.845 L 648.8759 617.845 C 648.8759 619.5019 647.5328 620.845 645.8759 620.845 L 620.8759 620.845 C 619.21906 620.845 617.8759 619.5019 617.8759 617.845 L 617.8759 586.845 C 617.8759 585.18816 619.21906 583.845 620.8759 583.845 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        </g>
+        <g id="Graphic_34">
+          <path d="M 651.8759 585.983 L 676.8759 585.983 C 678.5328 585.983 679.8759 587.32616 679.8759 588.983 L 679.8759 615.707 C 679.8759 617.3639 678.5328 618.707 676.8759 618.707 L 651.8759 618.707 C 650.21906 618.707 648.8759 617.3639 648.8759 615.707 L 648.8759 588.983 C 648.8759 587.32616 650.21906 585.983 651.8759 585.983 Z" fill="url(#Obj_Gradient_6)"/>
+          <path d="M 651.8759 585.983 L 676.8759 585.983 C 678.5328 585.983 679.8759 587.32616 679.8759 588.983 L 679.8759 615.707 C 679.8759 617.3639 678.5328 618.707 676.8759 618.707 L 651.8759 618.707 C 650.21906 618.707 648.8759 617.3639 648.8759 615.707 L 648.8759 588.983 C 648.8759 587.32616 650.21906 585.983 651.8759 585.983 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        </g>
+      </g>
+      <g id="Graphic_35">
+        <path d="M 682.8759 733.7877 L 792.3639 733.7877 C 794.0208 733.7877 795.3639 735.1308 795.3639 736.7877 L 795.3639 759.2357 C 795.3639 760.8925 794.0208 762.2357 792.3639 762.2357 L 682.8759 762.2357 C 681.2191 762.2357 679.8759 760.8925 679.8759 759.2357 L 679.8759 736.7877 C 679.8759 735.1308 681.2191 733.7877 682.8759 733.7877 Z" fill="white"/>
+        <path d="M 682.8759 733.7877 L 792.3639 733.7877 C 794.0208 733.7877 795.3639 735.1308 795.3639 736.7877 L 795.3639 759.2357 C 795.3639 760.8925 794.0208 762.2357 792.3639 762.2357 L 682.8759 762.2357 C 681.2191 762.2357 679.8759 760.8925 679.8759 759.2357 L 679.8759 736.7877 C 679.8759 735.1308 681.2191 733.7877 682.8759 733.7877 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_37">
+        <circle cx="873.066" cy="748.0117" r="76.7501226389705" fill="white"/>
+        <circle cx="873.066" cy="748.0117" r="76.7501226389705" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_38">
+        <path d="M 952.816 733.7877 L 1062.304 733.7877 C 1063.9609 733.7877 1065.304 735.1308 1065.304 736.7877 L 1065.304 759.2357 C 1065.304 760.8925 1063.9609 762.2357 1062.304 762.2357 L 952.816 762.2357 C 951.1592 762.2357 949.816 760.8925 949.816 759.2357 L 949.816 736.7877 C 949.816 735.1308 951.1592 733.7877 952.816 733.7877 Z" fill="white"/>
+        <path d="M 952.816 733.7877 L 1062.304 733.7877 C 1063.9609 733.7877 1065.304 735.1308 1065.304 736.7877 L 1065.304 759.2357 C 1065.304 760.8925 1063.9609 762.2357 1062.304 762.2357 L 952.816 762.2357 C 951.1592 762.2357 949.816 760.8925 949.816 759.2357 L 949.816 736.7877 C 949.816 735.1308 951.1592 733.7877 952.816 733.7877 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Group_48">
+        <g id="Graphic_41">
+          <path d="M 620.8759 734.3763 L 636.9327 734.3763 C 638.58955 734.3763 639.9327 735.7194 639.9327 737.3763 L 639.9327 759.8243 C 639.9327 761.4811 638.58955 762.8243 636.9327 762.8243 L 620.8759 762.8243 C 619.21906 762.8243 617.8759 761.4811 617.8759 759.8243 L 617.8759 737.3763 C 617.8759 735.7194 619.21906 734.3763 620.8759 734.3763 Z" fill="url(#Obj_Gradient_7)"/>
+          <path d="M 620.8759 734.3763 L 636.9327 734.3763 C 638.58955 734.3763 639.9327 735.7194 639.9327 737.3763 L 639.9327 759.8243 C 639.9327 761.4811 638.58955 762.8243 636.9327 762.8243 L 620.8759 762.8243 C 619.21906 762.8243 617.8759 761.4811 617.8759 759.8243 L 617.8759 737.3763 C 617.8759 735.7194 619.21906 734.3763 620.8759 734.3763 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        </g>
+        <g id="Graphic_40">
+          <path d="M 643.3897 727.7279 L 675.44646 727.7279 C 677.1033 727.7279 678.44646 729.071 678.44646 730.7279 L 678.44646 766.4726 C 678.44646 768.1295 677.1033 769.4726 675.44646 769.4726 L 643.3897 769.4726 C 641.7328 769.4726 640.3897 768.1295 640.3897 766.4726 L 640.3897 730.7279 C 640.3897 729.071 641.7328 727.7279 643.3897 727.7279 Z" fill="url(#Obj_Gradient_8)"/>
+          <path d="M 643.3897 727.7279 L 675.44646 727.7279 C 677.1033 727.7279 678.44646 729.071 678.44646 730.7279 L 678.44646 766.4726 C 678.44646 768.1295 677.1033 769.4726 675.44646 769.4726 L 643.3897 769.4726 C 641.7328 769.4726 640.3897 768.1295 640.3897 766.4726 L 640.3897 730.7279 C 640.3897 729.071 641.7328 727.7279 643.3897 727.7279 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        </g>
+      </g>
+      <g id="Graphic_42">
+        <path d="M 1068.304 721.7279 L 1112.1259 721.7279 C 1113.7828 721.7279 1115.1259 723.071 1115.1259 724.7279 L 1115.1259 772.4726 C 1115.1259 774.1295 1113.7828 775.4726 1112.1259 775.4726 L 1068.304 775.4726 C 1066.6472 775.4726 1065.304 774.1295 1065.304 772.4726 L 1065.304 724.7279 C 1065.304 723.071 1066.6472 721.7279 1068.304 721.7279 Z" fill="white"/>
+        <path d="M 1068.304 721.7279 L 1112.1259 721.7279 C 1113.7828 721.7279 1115.1259 723.071 1115.1259 724.7279 L 1115.1259 772.4726 C 1115.1259 774.1295 1113.7828 775.4726 1112.1259 775.4726 L 1068.304 775.4726 C 1066.6472 775.4726 1065.304 774.1295 1065.304 772.4726 L 1065.304 724.7279 C 1065.304 723.071 1066.6472 721.7279 1068.304 721.7279 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_43">
+        <text transform="translate(699.4934 688.64966)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="2.224" y="15" xml:space="preserve">1/4” MNPT </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="20.152" y="33.448" xml:space="preserve">nipple</tspan>
+        </text>
+      </g>
+      <g id="Graphic_44">
+        <text transform="translate(950.9199 774.6184)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="13.72" y="15" xml:space="preserve">1/4” MNPT &gt;</tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="2.224" y="33.448" xml:space="preserve">CGA-580 MNPT </tspan>
+        </text>
+      </g>
+      <g id="Graphic_45">
+        <text transform="translate(796.026 626.1782)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="27.112" y="15" xml:space="preserve">Harris HP 722</tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="8668621e-19" y="33.448" xml:space="preserve">Dual-Stage Regulator</tspan>
+        </text>
+      </g>
+      <g id="Graphic_46">
+        <text transform="translate(419.9202 588.845)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="0" y="15" xml:space="preserve">40-400 mL/min</tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="24.960002" y="33.448" xml:space="preserve">Rotameter </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="11.032002" y="51.895996" xml:space="preserve">(LZB-3WB-10)</tspan>
+        </text>
+      </g>
+      <g id="Graphic_47">
+        <text transform="translate(580.84245 783.8424)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="27000624e-20" y="15" xml:space="preserve">1/4” FNPT &gt; 1/8” MNPT</tspan>
+        </text>
+      </g>
+      <g id="Graphic_50">
+        <text transform="translate(634.04415 552.7603)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="4.905928" y="15" xml:space="preserve">Swagelok MNPT 1/8 SS</tspan>
+        </text>
+      </g>
+      <g id="Line_52">
+        <path d="M 679.8759 602.345 L 782.7304 602.345 L 782.7304 602.0214" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
+      </g>
+      <g id="Graphic_54">
+        <path d="M 576.84605 592.1204 L 590.84605 592.1204 C 591.39834 592.1204 591.84605 592.5681 591.84605 593.1204 L 591.84605 751.5696 C 591.84605 752.1219 591.39834 752.5696 590.84605 752.5696 L 576.84605 752.5696 C 576.2938 752.5696 575.84605 752.1219 575.84605 751.5696 L 575.84605 593.1204 C 575.84605 592.5681 576.2938 592.1204 576.84605 592.1204 Z" fill="white"/>
+        <path d="M 576.84605 592.1204 L 590.84605 592.1204 C 591.39834 592.1204 591.84605 592.5681 591.84605 593.1204 L 591.84605 751.5696 C 591.84605 752.1219 591.39834 752.5696 590.84605 752.5696 L 576.84605 752.5696 C 576.2938 752.5696 575.84605 752.1219 575.84605 751.5696 L 575.84605 593.1204 C 575.84605 592.5681 576.2938 592.1204 576.84605 592.1204 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_56">
+        <circle cx="583.84605" cy="690.1347" r="6.48507829305179" fill="black"/>
+        <circle cx="583.84605" cy="690.1347" r="6.48507829305179" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_57">
+        <path d="M 513.09033 733.7877 L 546.8162 733.7877 C 548.47304 733.7877 549.8162 735.1308 549.8162 736.7877 L 549.8162 759.2357 C 549.8162 760.8925 548.47304 762.2357 546.8162 762.2357 L 513.09033 762.2357 C 511.4335 762.2357 510.09033 760.8925 510.09033 759.2357 L 510.09033 736.7877 C 510.09033 735.1308 511.4335 733.7877 513.09033 733.7877 Z" fill="white"/>
+        <path d="M 513.09033 733.7877 L 546.8162 733.7877 C 548.47304 733.7877 549.8162 735.1308 549.8162 736.7877 L 549.8162 759.2357 C 549.8162 760.8925 548.47304 762.2357 546.8162 762.2357 L 513.09033 762.2357 C 511.4335 762.2357 510.09033 760.8925 510.09033 759.2357 L 510.09033 736.7877 C 510.09033 735.1308 511.4335 733.7877 513.09033 733.7877 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+      </g>
+      <g id="Graphic_58">
+        <text transform="translate(425.69436 720.3397)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="20.991747" y="15" xml:space="preserve">Flow</tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="15.343747" y="33.448" xml:space="preserve">Adjust </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="19.199747" y="51.895996" xml:space="preserve">Valve</tspan>
+        </text>
+      </g>
+    </g>
+  </g>
+</svg>
