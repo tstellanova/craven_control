@@ -26,16 +26,24 @@ async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
     // println!(" 0x20 cfg_rsp: {:?}", cfg_rsp);
 
     let tk_valid_resp: Vec<u16> = ctx.read_holding_registers(REG_TK_VALIDITY, 2).await??;
-    // println!("REG_TK_TEMP_VALS tk_valid_resp: {:?}", tk_valid_resp);
-    let ch1_tk_conn: bool = tk_valid_resp[0] == 0; // 0: The thermocouple is connected, 1: The thermocouple is not connected
-    let ch2_tk_conn: bool = tk_valid_resp[1] == 0;
+    // println!(" REG_TK_VALIDITY: {:?}", tk_valid_resp);
+    let mut ch1_tk_conn: bool = tk_valid_resp[0] == 0; // 0: The thermocouple is connected, 1: The thermocouple is not connected
+    let mut ch2_tk_conn: bool = tk_valid_resp[1] == 0;
 
     // TODO use reg address consts
     // example of reading all the dual TK registers:
     let tk_resp: Vec<u16> = ctx.read_holding_registers(REG_TK_TEMP_VALS, 2).await??;
-    // println!(" REG_TK_TEMP_VALS tk_resp: {:?}", tk_resp);
+    // println!(" REG_TK_TEMP_VALS: {:?}", tk_resp);
     let ch1_tk_val: f32 = (tk_resp[0] as f32) / 10.0; // resolution is 0.1 °C
     let ch2_tk_val: f32 = (tk_resp[1] as f32) / 10.0; // resolution is 0.1 °C
+
+    // the TK reader will sometimes report a thermocouple is disconnected when it's not
+    if !ch1_tk_conn && ch1_tk_val < 1000.0 { //1000 C
+        ch1_tk_conn = true;
+    }
+    if !ch2_tk_conn && ch2_tk_val < 1000.0 { //1000 C
+        ch2_tk_conn = true;
+    }
 
     let ch1_tk_opt = if ch1_tk_conn { Some(ch1_tk_val) } else { None };
     let ch2_tk_opt = if ch2_tk_conn { Some(ch2_tk_val) } else { None };
@@ -109,9 +117,9 @@ async fn set_current_loop_drive(ctx: &mut tokio_modbus::client::Context,  millia
     ctx.set_slave(Slave(NODEID_N4IOA01_CURR_GEN)); 
 
     // println!("Reading current loop value");
-    let old_set: Vec<u16> = ctx.read_holding_registers(REG_N4IOA01_CURR_VAL, 1).await??;
-    // println!("read_rsp: {read_rsp:?}");
-    sleep(Duration::from_millis(250)).await;
+    // let old_set: Vec<u16> = ctx.read_holding_registers(REG_N4IOA01_CURR_VAL, 1).await??;
+    // // println!("read_rsp: {read_rsp:?}");
+    // sleep(Duration::from_millis(250)).await;
 
     let out_ma_setting: u16 = (milliamps * 100.0).round() as u16;
     // println!("writing val of : {milliamps:?} mA  -> {out_ma_setting:?}");
@@ -206,39 +214,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("{}_recorder.csv",start_time))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    writeln!(csv_writer, "timestamp,TK1_C,pyro_mA,420_out_mA")?;
+    writeln!(csv_writer, "epoch_secs,TK1_C,TK2_C,pyro_mA,420_out_mA")?;
 
     let milliamps_per_celsius:f32 = (20.0 - 4.0)/1000.0; //TODO check correctness of this
     let mut cur_core_temperature = 20.0f32;
     let mut cur_target_milliamps = 4.0f32;
     loop { 
-        sleep(Duration::from_millis(250));
+        sleep(Duration::from_millis(125));
         let (ch1_tk_opt, ch2_tk_opt) = read_dual_tk_temps(&mut ctx).await?;
-        cur_core_temperature = ch1_tk_opt.unwrap_or(ch2_tk_opt.unwrap_or(1000.0));
-        println!("TK {cur_core_temperature:?}°C");
+        let cur_tk1 = ch1_tk_opt.unwrap_or(0.00);
+        let cur_tk2 = ch2_tk_opt.unwrap_or(0.00);
 
-        sleep(Duration::from_millis(250)).await;
+        // cur_core_temperature = ch1_tk_opt.unwrap_or(ch2_tk_opt.unwrap_or(1000.0));
+        // println!("TK1 {ch1_tk_opt:?}°C TK2 {ch2_tk_opt:?}°C");
+
+        sleep(Duration::from_millis(125)).await;
         let (pyro_volts, pyro_milliamps) = read_precision_iv_adc(&mut ctx).await?;
-        println!("pyrom {pyro_volts:?} V, {pyro_milliamps:?} mA");
+        // println!("pyrom {pyro_volts:?} V, {pyro_milliamps:?} mA");
 
-        cur_target_milliamps = 4.0 + milliamps_per_celsius * cur_core_temperature;
-        sleep(Duration::from_millis(250)).await;
+        cur_target_milliamps = pyro_milliamps;
+        // cur_target_milliamps = 4.0 + milliamps_per_celsius * cur_core_temperature;
+        sleep(Duration::from_millis(125)).await;
         set_current_loop_drive(&mut ctx, cur_target_milliamps).await?;
 
         sleep(Duration::from_millis(250)).await;
         let current_loop_ma = read_420_iv_adc(&mut ctx).await?;
-        println!("drive {current_loop_ma:?} mA");
+        // println!("drive {current_loop_ma:?} mA");
 
         let timestamp = chrono::Utc::now().timestamp();
-        writeln!(
-            csv_writer,
-            "{},{},{},{}",
+        let log_line = format!( "{},{},{},{},{}",
             timestamp,
-            cur_core_temperature,
-            pyro_milliamps,
-            current_loop_ma
-        )?;
-
+            cur_tk1, cur_tk2,
+            cur_target_milliamps,
+            current_loop_ma);
+        println!("{}",log_line);
+        writeln!(  csv_writer,"{}",  log_line)?;
         csv_writer.flush()?;
         // TODO handle events that would lead to shutting down eg current source
     }
