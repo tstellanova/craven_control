@@ -125,10 +125,10 @@ async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32,  reg_node_id: u1
         eprintln!("latest_node_id {latest_node_id:?} != {new_node_id:?}");
     }
 
-    if new_node_id == NODEID_PREC_CURR_SRC {
+    if new_node_id == NODEID_YKPVCCS010_CURR_SRC {
         // flush the configuration parameter change to the node's persistent storage 
         println!("persisting node configuration");
-        let flush_resp = ctx.write_single_register(REG_SAVE_CFG_PREC_CURR, 1).await?;
+        let flush_resp = ctx.write_single_register(REG_SAVE_CFG_YKPVCCS010_CURR_SRC, 1).await?;
         if flush_resp.is_err() {
             eprintln!("> flush_resp: {:?}", flush_resp);
         }

@@ -20,19 +20,19 @@ use craven_control::*;
 async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 -> Result<(Option<f32>, Option<f32>), Box<dyn std::error::Error>> 
 {
-    ctx.set_slave(Slave(NODEID_DUAL_TK));
+    ctx.set_slave(Slave(NODEID_YKKTC1202_DUAL_TK));
     // move RTK check into a separate function
     // let cfg_rsp: Vec<u16> = ctx.read_holding_registers(0x20, 3).await??;
     // println!(" 0x20 cfg_rsp: {:?}", cfg_rsp);
 
-    let tk_valid_resp: Vec<u16> = ctx.read_holding_registers(REG_TK_VALIDITY, 2).await??;
+    let tk_valid_resp: Vec<u16> = ctx.read_holding_registers(REG_YKKTC1202_VALIDITY, 2).await??;
     // println!(" REG_TK_VALIDITY: {:?}", tk_valid_resp);
     let mut ch1_tk_conn: bool = tk_valid_resp[0] == 0; // 0: The thermocouple is connected, 1: The thermocouple is not connected
     let mut ch2_tk_conn: bool = tk_valid_resp[1] == 0;
 
     // TODO use reg address consts
     // example of reading all the dual TK registers:
-    let tk_resp: Vec<u16> = ctx.read_holding_registers(REG_TK_TEMP_VALS, 2).await??;
+    let tk_resp: Vec<u16> = ctx.read_holding_registers(REG_YKKTC1202_TEMP_VALS, 2).await??;
     // println!(" REG_TK_TEMP_VALS: {:?}", tk_resp);
     let ch1_tk_val: f32 = (tk_resp[0] as f32) / 10.0; // resolution is 0.1 °C
     let ch2_tk_val: f32 = (tk_resp[1] as f32) / 10.0; // resolution is 0.1 °C
@@ -143,7 +143,7 @@ async fn set_precision_current_drive(ctx: &mut tokio_modbus::client::Context, mi
 
     // println!("set_precision_current_drive: {milliamps:?} mA");
 
-    ctx.set_slave(Slave(NODEID_PREC_CURR_SRC)); 
+    ctx.set_slave(Slave(NODEID_YKPVCCS010_CURR_SRC)); 
     // println!("Reading existing drive current value");
     let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_ADDR_DRIVE_MILLIAMPS, 1).await??;
     // println!("existing current read_rsp: {read_rsp:?}");
@@ -176,7 +176,7 @@ async fn set_precision_current_drive(ctx: &mut tokio_modbus::client::Context, mi
 async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
 {
     // measures Type K thermocouple signal
-    ping_one_modbus_node_id(ctx, NODEID_DUAL_TK, REG_NODEID_TK).await?;
+    ping_one_modbus_node_id(ctx, NODEID_YKKTC1202_DUAL_TK, REG_NODEID_YKKTC1202_DUAL_TK).await?;
     // 420 current loop source (simulates pyrometer)
     ping_one_modbus_node_id(ctx,NODEID_N4IOA01_CURR_GEN, REG_NODEID_N4IOA01).await?;
     // 420 current loop ammeter (verifies pyrometer simulation signal)
