@@ -1,6 +1,8 @@
 #![allow(unused)]
 
 use std::process::exit;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -11,6 +13,8 @@ use tokio_modbus::client::{Client, Reader, Writer};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
+use ctrlc;
+use std::sync::mpsc::channel;
 
 use craven_control::*;
 
@@ -111,7 +115,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cur_pyro_sim_milliamps = MIN_PYRO_MA;
     let mut elec_drive_milliamps = 0.0f32;
 
-    loop { 
+    // Create an AtomicBool flag protected by Arc for thread-safe sharing
+    let running = Arc::new(AtomicBool::new(true));
+    let r = running.clone();
+
+    // Set the Ctrl+C handler
+    ctrlc::set_handler(move || {
+        println!("\nReceived Ctrl+C, initiating shutdown...");
+        r.store(false, Ordering::SeqCst);
+    }).expect("Error setting Ctrl-C handler");
+
+    while running.load(Ordering::SeqCst) { 
         sleep(Duration::from_millis(125)).await;
         let (elec_volts, elec_milliamps) = read_electrode_pair_iv_adc(&mut ctx).await?;
         // println!("electrode {elec_volts:?} V, {elec_milliamps:?} mA");
