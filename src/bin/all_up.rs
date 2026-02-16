@@ -5,11 +5,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::time::sleep;
-
 use tokio_modbus::prelude::*;
 
 use tokio_modbus::client::{Client, Reader, Writer};
-// use byteorder::{BigEndian, ByteOrder};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
@@ -81,11 +79,8 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     // pyro 4-20 mA current loop ammeter (verifies pyrometer simulation signal)
     ping_one_modbus_node_id(ctx,NODEID_N4AIA04_IV_ADC, REG_NODEID_N4AIA04).await?;
 
-
-    // ping_one_modbus_node_id(ctx,NODEID_N4VIA02_IV_ADC, REG_NODEID_N4VIA02).await?;
-
     // supplies current to the electrode probe
-    //TODO ping_one_modbus_node_id(ctx,NODEID_YKPVCCS010_CURR_SRC, REG_NODEID_YKPVCCS010_CURR_SRC).await?;
+    ping_one_modbus_node_id(ctx,NODEID_YKPVCCS010_CURR_SRC, REG_NODEID_YKPVCCS010_CURR_SRC).await?;
 
     // measures the voltage at and current flowing through electrode probe
     ping_one_modbus_node_id(ctx, NODEID_YKDAQ1402_IV_ADC, REG_NODEID_YKDAQ1402_IV_ADC).await?;
@@ -95,41 +90,33 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use tokio_serial::SerialStream;
-
-    use tokio_modbus::prelude::*;
-
-    // actual usb device ID of one USB-RS485 adapter
-    let tty_path = "/dev/cu.usbserial-BG02SI88";
-    let baud_rate = 9600;
-
-    // Via TCP server bridge (a Wifi bridge on our local network)
+    // Connect to Modbus apparatus via TCP server bridge (a WiFi bridge on our local network)
     let socket_addr: std::net::SocketAddr = "10.0.1.151:502".parse()?;
 
     println!("Connecting to: '{socket_addr:?}'");
     let mut ctx: client::Context = tcp::connect(socket_addr).await?;
     enumerate_required_modules(&mut ctx).await?;
 
-
     let start_time = chrono::Utc::now().timestamp();
     let log_out_path = format!("{}_recorder.csv",start_time);
     println!("Recording data to {log_out_path:?} ...");
-    let logfile = File::create(format!("{}_recorder.csv",start_time))?;
+    let logfile = File::create(format!("./data/{}_recorder.csv",start_time))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,TK1_C,TK2_C,avg_C,elec_drive_mA,self_reported_mA,elec_V,elec_mA,pyro_mA";
+    const CSV_HEADER: &str =  "epoch_secs,TK1_C,TK2_C,avg_C,elecdrive_mA,elecdrive_actual_mA,elec_V,elec_mA,pyro_sim_mA,pyro_actual_mA";
     writeln!(csv_writer, "{}", CSV_HEADER)?;
     println!("{}",CSV_HEADER);
 
-    const MIN_PYRO_MA:f32 = 4.0;
-    const MAX_PYRO_MA:f32 = 20.0;
-    const MAX_PYRO_TEMP_C:f32 = 1000.0;
-    const PYRO_CELSIUS_RANGE:f32 = MAX_PYRO_TEMP_C - 0.0;
+    const MIN_PYRO_MA:f32 = 4f32;
+    const MAX_PYRO_MA:f32 = 20f32;
+    const MAX_PYRO_TEMP_C:f32 = 1000f32;
+    const PYRO_CELSIUS_RANGE:f32 = MAX_PYRO_TEMP_C - 0f32;
     const MILLIAMPS_PER_CELSIUS:f32 = (MAX_PYRO_MA - MIN_PYRO_MA)/PYRO_CELSIUS_RANGE; //TODO check correctness of this
-    let mut cur_core_temperature = 20.0f32;
+    let mut cur_core_temperature = 20f32;
     let mut pyro_loop_sim_ma = MIN_PYRO_MA;
-    let mut elec_drive_milliamps = 0.0f32;
-    let mut self_reported_ma = 0f32;
+    let mut pyro_loop_actual_ma = 0f32;
+    let mut elecdrive_milliamps = 2.0f32; //TODO temporary static value
+    let mut elecdrive_actual_ma = 0f32;
 
     // Create an AtomicBool flag protected by Arc for thread-safe sharing
     let running = Arc::new(AtomicBool::new(true));
@@ -148,55 +135,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         sleep(Duration::from_millis(125));
         let (ch1_tk_opt, ch2_tk_opt) = read_dual_tk_temps(&mut ctx).await?;
-        let cur_tk1 = ch1_tk_opt.unwrap_or(0.00);
-        let cur_tk2 = ch2_tk_opt.unwrap_or(cur_tk1);
-        let cur_core_temperature = 
-            if cur_tk1 > 0.0 {
-                (cur_tk1 + cur_tk2) / 2f32
+        let tk1_c = ch1_tk_opt.unwrap_or(0f32);
+        let tk2_c = ch2_tk_opt.unwrap_or(0f32);
+        let avg_core_tk_c = 
+            if ch1_tk_opt.is_some() {
+                if ch2_tk_opt.is_some() {  (tk1_c + tk2_c) / 2f32 }
+                else { tk1_c }
             }
-            else {
-                MAX_PYRO_TEMP_C
-            };
-        // cur_core_temperature = ch1_tk_opt.unwrap_or(ch2_tk_opt.unwrap_or(1000.0));
-        // println!("TK1 {cur_tk1:?}°C TK2 {cur_tk2:?}°C avg: {cur_core_temperature:?}°C");
+            else if ch2_tk_opt.is_some() { tk2_c }
+            else { MAX_PYRO_TEMP_C };
+        // println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
 
-        // TODO calculate correctly
-        // pyro_loop_sim_ma = MIN_PYRO_MA + MILLIAMPS_PER_CELSIUS * cur_core_temperature;
+        // TODO verify calculation
+        pyro_loop_sim_ma = MIN_PYRO_MA + MILLIAMPS_PER_CELSIUS * avg_core_tk_c;
         sleep(Duration::from_millis(125)).await;
         set_pyro_420ma_drive(&mut ctx, pyro_loop_sim_ma).await?;
-        pyro_loop_sim_ma += 0.5f32; //TODO
-        if pyro_loop_sim_ma > 20.0f32 {
-            pyro_loop_sim_ma = 3.5f32;
-        }
 
-        let pyro_loop_ma = read_pyro_420ma_value(&mut ctx).await?;
-        println!("pyro sim {pyro_loop_sim_ma:?}mA actual {pyro_loop_ma:?} mA");
+        sleep(Duration::from_millis(125)).await;
+        pyro_loop_actual_ma = read_pyro_420ma_value(&mut ctx).await?;
+        // println!("pyro sim {pyro_loop_sim_ma:?}mA actual {pyro_loop_actual_ma:?} mA");
 
         //TODO recalculate ideal electrode drive current
-        // sleep(Duration::from_millis(125)).await;
-        // self_reported_ma = set_precision_current_drive(&mut ctx,elec_drive_milliamps).await?;
-        elec_drive_milliamps += 0.25f32;
-        if elec_drive_milliamps > 5.0f32 { elec_drive_milliamps = 0f32;}
+        sleep(Duration::from_millis(125)).await;
+        elecdrive_actual_ma = set_precision_current_drive(&mut ctx, elecdrive_milliamps).await?;
 
         let timestamp = chrono::Utc::now().timestamp();
-        let log_line = format!( "{},{},{},{},{},{},{},{},{}",
+        let log_line = format!( "{},{},{},{},{},{},{},{},{},{}",
             timestamp,
-            cur_tk1, cur_tk2,cur_core_temperature,
-            elec_drive_milliamps,self_reported_ma,
+            tk1_c, tk2_c, avg_core_tk_c,
+            elecdrive_milliamps, elecdrive_actual_ma,
             elec_volts, elec_milliamps,
-            pyro_loop_sim_ma,
+            pyro_loop_sim_ma, pyro_loop_actual_ma
             );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
         csv_writer.flush()?;
     }
 
-    //TODO add ctrl-c handler
-    println!("shutting down...");
+    println!("Shutting down outputs...");
     sleep(Duration::from_millis(125)).await;
     set_pyro_420ma_drive(&mut ctx, 0f32).await?;
-    // sleep(Duration::from_millis(125)).await;
-    // set_precision_current_drive(&mut ctx,0f32).await?;
+    sleep(Duration::from_millis(125)).await;
+    set_precision_current_drive(&mut ctx,0f32).await?;
 
     ctx.disconnect().await?;
 
