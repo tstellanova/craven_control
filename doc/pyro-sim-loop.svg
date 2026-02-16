@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xl="http://www.w3.org/1999/xlink" xmlns:dc="http://purl.org/dc/elements/1.1/" version="1.1" viewBox="193 55 590 568" width="590" height="568">
+  <defs/>
+  <g id="Canvas_1" stroke-dasharray="none" stroke-opacity="1" stroke="none" fill="none" fill-opacity="1">
+    <title>Canvas 1</title>
+    <rect fill="white" x="193" y="55" width="590" height="568"/>
+    <g id="Canvas_1_Layer_1">
+      <title>Layer 1</title>
+      <g id="Graphic_10">
+        <path d="M 484.7243 120.1875 L 560.49435 120.1875 C 564.9126 120.1875 568.49435 123.76922 568.49435 128.1875 L 568.49435 185.6875 C 568.49435 190.10578 564.9126 193.6875 560.49435 193.6875 L 484.7243 193.6875 C 480.30605 193.6875 476.7243 190.10578 476.7243 185.6875 L 476.7243 128.1875 C 476.7243 123.76922 480.30605 120.1875 484.7243 120.1875 Z" fill="white"/>
+        <path d="M 484.7243 120.1875 L 560.49435 120.1875 C 564.9126 120.1875 568.49435 123.76922 568.49435 128.1875 L 568.49435 185.6875 C 568.49435 190.10578 564.9126 193.6875 560.49435 193.6875 L 484.7243 193.6875 C 480.30605 193.6875 476.7243 190.10578 476.7243 185.6875 L 476.7243 128.1875 C 476.7243 123.76922 480.30605 120.1875 484.7243 120.1875 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(481.7243 120.0415)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="10.197014" y="15" xml:space="preserve">4-20 mA  </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="14.213014" y="33.448" xml:space="preserve">Current  </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="22.509014" y="51.895996" xml:space="preserve">Loop </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="5.0370136" y="70.34399" xml:space="preserve">Generator</tspan>
+        </text>
+      </g>
+      <g id="Graphic_9">
+        <path d="M 214.83203 293.06348 L 362.97554 293.06348 C 367.3938 293.06348 370.97554 296.6452 370.97554 301.06348 L 370.97554 474.5 C 370.97554 478.9183 367.3938 482.5 362.97554 482.5 L 214.83203 482.5 C 210.41375 482.5 206.83203 478.9183 206.83203 474.5 L 206.83203 301.06348 C 206.83203 296.6452 210.41375 293.06348 214.83203 293.06348 Z" fill="white"/>
+        <path d="M 214.83203 293.06348 L 362.97554 293.06348 C 367.3938 293.06348 370.97554 296.6452 370.97554 301.06348 L 370.97554 474.5 C 370.97554 478.9183 367.3938 482.5 362.97554 482.5 L 214.83203 482.5 C 210.41375 482.5 206.83203 478.9183 206.83203 474.5 L 206.83203 301.06348 C 206.83203 296.6452 210.41375 293.06348 214.83203 293.06348 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(211.83203 369.33374)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="43.727754" y="15" xml:space="preserve">Induction </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="53.223754" y="33.448" xml:space="preserve">Heater</tspan>
+        </text>
+      </g>
+      <g id="Graphic_8">
+        <path d="M 291.26167 424.11803 L 362.97554 424.11803 C 367.3938 424.11803 370.97554 427.69975 370.97554 432.11803 L 370.97554 474.5 C 370.97554 478.9183 367.3938 482.5 362.97554 482.5 L 291.26167 482.5 C 286.8434 482.5 283.26167 478.9183 283.26167 474.5 L 283.26167 432.11803 C 283.26167 427.69975 286.8434 424.11803 291.26167 424.11803 Z" fill="white"/>
+        <path d="M 291.26167 424.11803 L 362.97554 424.11803 C 367.3938 424.11803 370.97554 427.69975 370.97554 432.11803 L 370.97554 474.5 C 370.97554 478.9183 367.3938 482.5 362.97554 482.5 L 291.26167 482.5 C 286.8434 482.5 283.26167 478.9183 283.26167 474.5 L 283.26167 432.11803 C 283.26167 427.69975 286.8434 424.11803 291.26167 424.11803 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(288.26167 434.861)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="7.448937" y="15" xml:space="preserve">Pyro PID  </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="20.624937" y="33.448" xml:space="preserve">Input</tspan>
+        </text>
+      </g>
+      <g id="Graphic_6">
+        <path d="M 484.7243 409 L 560.49435 409 C 564.9126 409 568.49435 412.5817 568.49435 417 L 568.49435 474.5 C 568.49435 478.9183 564.9126 482.5 560.49435 482.5 L 484.7243 482.5 C 480.30605 482.5 476.7243 478.9183 476.7243 474.5 L 476.7243 417 C 476.7243 412.5817 480.30605 409 484.7243 409 Z" fill="white"/>
+        <path d="M 484.7243 409 L 560.49435 409 C 564.9126 409 568.49435 412.5817 568.49435 417 L 568.49435 474.5 C 568.49435 478.9183 564.9126 482.5 560.49435 482.5 L 484.7243 482.5 C 480.30605 482.5 476.7243 478.9183 476.7243 474.5 L 476.7243 417 C 476.7243 412.5817 480.30605 409 484.7243 409 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(481.7243 408.854)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="10.197014" y="15" xml:space="preserve">4-20 mA </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="14.213014" y="33.448" xml:space="preserve">Current  </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="22.509014" y="51.895996" xml:space="preserve">Loop </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="24.293014" y="70.34399" xml:space="preserve">ADC </tspan>
+        </text>
+      </g>
+      <g id="Graphic_5">
+        <path d="M 484.7243 269.28473 L 560.49435 269.28473 C 564.9126 269.28473 568.49435 272.86646 568.49435 277.28473 L 568.49435 334.78473 C 568.49435 339.203 564.9126 342.78473 560.49435 342.78473 L 484.7243 342.78473 C 480.30605 342.78473 476.7243 339.203 476.7243 334.78473 L 476.7243 277.28473 C 476.7243 272.86646 480.30605 269.28473 484.7243 269.28473 Z" fill="white"/>
+        <path d="M 484.7243 269.28473 L 560.49435 269.28473 C 564.9126 269.28473 568.49435 272.86646 568.49435 277.28473 L 568.49435 334.78473 C 568.49435 339.203 564.9126 342.78473 560.49435 342.78473 L 484.7243 342.78473 C 480.30605 342.78473 476.7243 339.203 476.7243 334.78473 L 476.7243 277.28473 C 476.7243 272.86646 480.30605 269.28473 484.7243 269.28473 Z" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(481.7243 278.36274)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="10.197014" y="15" xml:space="preserve">4-20 mA </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="18.813014" y="33.448" xml:space="preserve">Signal </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="14.373014" y="51.895996" xml:space="preserve">Isolator</tspan>
+        </text>
+      </g>
+      <g id="Line_15">
+        <line x1="499.66683" y1="342.78473" x2="370.97554" y2="438.7135" stroke="#ff2600" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Line_21">
+        <line x1="499.66683" y1="193.6875" x2="499.66683" y2="269.28473" stroke="#ff2600" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Line_22">
+        <line x1="545.55185" y1="193.6875" x2="545.55185" y2="269.28473" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Line_23">
+        <line x1="545.55185" y1="342.78473" x2="545.55185" y2="409" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Graphic_24">
+        <text transform="translate(375.97554 402.76786)" fill="black">
+          <tspan font-family="Apple Symbols" font-size="24" fill="black" x="0" y="16" xml:space="preserve">⊕</tspan>
+        </text>
+      </g>
+      <g id="Graphic_25">
+        <text transform="translate(375.97554 477.9001)" fill="black">
+          <tspan font-family="Apple Symbols" font-size="24" fill="black" x="0" y="16" xml:space="preserve">⊖</tspan>
+        </text>
+      </g>
+      <g id="Graphic_28">
+        <text transform="translate(477.10547 224.7154)" fill="black">
+          <tspan font-family="Apple Symbols" font-size="24" fill="black" x="0" y="16" xml:space="preserve">⊕</tspan>
+        </text>
+      </g>
+      <g id="Graphic_29">
+        <text transform="translate(459.01953 342.40317)" fill="black">
+          <tspan font-family="Apple Symbols" font-size="24" fill="black" x="0" y="16" xml:space="preserve">⊕</tspan>
+        </text>
+      </g>
+      <g id="Graphic_30">
+        <text transform="translate(557.65625 224.7154)" fill="black">
+          <tspan font-family="Apple Symbols" font-size="24" fill="black" x="0" y="16" xml:space="preserve">⊖</tspan>
+        </text>
+      </g>
+      <g id="Graphic_31">
+        <text transform="translate(557.65625 350.27427)" fill="black">
+          <tspan font-family="Apple Symbols" font-size="24" fill="black" x="0" y="16" xml:space="preserve">⊖</tspan>
+        </text>
+      </g>
+      <g id="Line_32">
+        <line x1="476.7243" y1="464.125" x2="370.97554" y2="467.9045" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Graphic_36">
+        <rect x="630.4671" y="142.04688" width="63.936" height="28.447998" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(635.4671 147.04688)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="756728e-18" y="15" xml:space="preserve">JST-PH</tspan>
+        </text>
+      </g>
+      <g id="Graphic_37">
+        <rect x="598.61906" y="239.01953" width="127.632" height="46.895996" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(603.6191 244.01953)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="4.448" y="15" xml:space="preserve">Screw Terminal  </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="34.368" y="33.448" xml:space="preserve">(crimp)</tspan>
+        </text>
+      </g>
+      <g id="Graphic_38">
+        <rect x="659.0351" y="549" width="67.216" height="46.895996" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(664.0351 554)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="2.224" y="15" xml:space="preserve">Dupont </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="4.16" y="33.448" xml:space="preserve">(crimp)</tspan>
+        </text>
+      </g>
+      <g id="Graphic_39">
+        <rect x="598.61906" y="315.0586" width="127.632" height="46.895996" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(603.6191 320.0586)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="4.448" y="15" xml:space="preserve">Screw Terminal  </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="34.368" y="33.448" xml:space="preserve">(crimp)</tspan>
+        </text>
+      </g>
+      <g id="Line_41">
+        <line x1="651.312" y1="170.49487" x2="640.9927" y2="239.01953" stroke="#ff2600" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Line_42">
+        <line x1="673.1764" y1="170.49487" x2="684.6395" y2="239.01953" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Line_43">
+        <line x1="683.87744" y1="361.9546" x2="717.1826" y2="549" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+      </g>
+      <g id="Graphic_44">
+        <rect x="269.856" y="549" width="111.056" height="46.895996" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="1"/>
+        <text transform="translate(274.856 554)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="2.224" y="15" xml:space="preserve">2-pin Circular </tspan>
+          <tspan font-family="Helvetica Neue" font-size="16" fill="black" x="37.048" y="33.448" xml:space="preserve">DIN</tspan>
+        </text>
+      </g>
+      <g id="Line_45">
+        <path d="M 615.8385 361.9546 L 600.84306 565 L 380.912 566.1952" stroke="#ff2600" stroke-linecap="round" stroke-linejoin="miter" stroke-width="2"/>
+      </g>
+      <g id="Graphic_46">
+        <text transform="translate(383.688 543.4771)" fill="black">
+          <tspan font-family="Apple Symbols" font-size="24" fill="black" x="0" y="16" xml:space="preserve">⊕</tspan>
+        </text>
+      </g>
+      <g id="Line_47">
+        <line x1="380.912" y1="578.7008" x2="659.0351" y2="578.7008" stroke="black" stroke-linecap="round" stroke-linejoin="miter" stroke-width="2"/>
+      </g>
+      <g id="Graphic_48">
+        <text transform="translate(383.688 584.8873)" fill="black">
+          <tspan font-family="Apple Symbols" font-size="24" fill="black" x="0" y="16" xml:space="preserve">⊖</tspan>
+        </text>
+      </g>
+      <g id="Graphic_49">
+        <text transform="translate(616.43875 589.0318)" fill="black">
+          <tspan font-family="Apple Symbols" font-size="24" fill="black" x="0" y="16" xml:space="preserve">⊕C1</tspan>
+        </text>
+      </g>
+      <g id="Graphic_50">
+        <text transform="translate(436.5664 483.23884)" fill="black">
+          <tspan font-family="Apple Symbols" font-size="24" fill="black" x="0" y="16" xml:space="preserve">⊕C1</tspan>
+        </text>
+      </g>
+      <g id="Graphic_51">
+        <text transform="translate(724.582 515.1384)" fill="black">
+          <tspan font-family="Apple Symbols" font-size="24" fill="black" x="0" y="16" xml:space="preserve">⊖GND</tspan>
+        </text>
+      </g>
+      <g id="Graphic_52">
+        <text transform="translate(198.20703 100.62549)" fill="black">
+          <tspan font-family="Helvetica Neue" font-size="36" fill="black" x="29.447264" y="34" xml:space="preserve">Pyrometer </tspan>
+          <tspan font-family="Helvetica Neue" font-size="36" fill="black" x="35.783264" y="77.008" xml:space="preserve">Simulator</tspan>
+          <tspan font-family="Helvetica Neue" font-size="36" fill="black" x="15.119264" y="120.01599" xml:space="preserve">Loop Wiring</tspan>
+        </text>
+      </g>
+    </g>
+  </g>
+</svg>
