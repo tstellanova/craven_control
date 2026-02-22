@@ -173,6 +173,7 @@ pub async fn read_n4aia04_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
     let milliamp_vals: Vec<u16> = ctx.read_holding_registers(REG_N4AIA04_CH1_CURR, 2).await??;
     // println!(" N4AIA04  mA VALS ({REG_N4VIA02_CURR_VALS:?})[2]: {milliamp_vals:?}");
     let ch1_milliamps = (milliamp_vals[0] as f32)/10.0;
+    // let ch2_milliamps = (milliamp_vals[1] as f32)/10.0;
     //TODO extract mA and voltage?
     // let voltage_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_VOLT_VALS, 2).await??;
     // println!(" N4VIA02 V VALS ({REG_N4VIA02_VOLT_VALS:?})[2]: {voltage_vals:?}");

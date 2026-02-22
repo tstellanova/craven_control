@@ -13,7 +13,7 @@ use std::io::{BufWriter, Write};
 
 use ctrlc;
 use std::sync::mpsc::channel;
-
+use approx::{AbsDiff, abs_diff_ne};
 use craven_control::*;
 
 /**
@@ -37,9 +37,9 @@ async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
 }
 
 /**
- * Set the output drive current of the precision current source 
+ * Set the output drive current of the test electrodes 
  */
-async fn set_precision_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<f32, Box<dyn std::error::Error>> 
+async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<f32, Box<dyn std::error::Error>> 
 {
     set_ykpvccs0100_current_drive(ctx, milliamps).await
 }
@@ -128,10 +128,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         r.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
 
+    let mut last_pyro_sim_ma = 3f32;
+
     while running.load(Ordering::SeqCst) { 
-        sleep(Duration::from_millis(125)).await;
-        let (elec_volts, elec_milliamps) = read_electrode_pair_iv_adc(&mut ctx).await?;
-        // println!("electrode {elec_volts:?} V, {elec_milliamps:?} mA");
 
         sleep(Duration::from_millis(125));
         let (ch1_tk_opt, ch2_tk_opt) = read_dual_tk_temps(&mut ctx).await?;
@@ -146,18 +145,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             else { MAX_PYRO_TEMP_C };
         // println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
 
-        // TODO verify calculation
         pyro_loop_sim_ma = MIN_PYRO_MA + MILLIAMPS_PER_CELSIUS * avg_core_tk_c;
-        sleep(Duration::from_millis(125)).await;
-        set_pyro_420ma_drive(&mut ctx, pyro_loop_sim_ma).await?;
-
+        // Setting a new current value may cause a short dropout in current:
+        // we don't set a new current value unless it's significantly different than previous
+        if abs_diff_ne!(last_pyro_sim_ma, pyro_loop_sim_ma, epsilon = 0.01) {
+            sleep(Duration::from_millis(125)).await;
+            set_pyro_420ma_drive(&mut ctx, pyro_loop_sim_ma).await?;
+            last_pyro_sim_ma = pyro_loop_sim_ma;
+            // println!("pyro sim {pyro_loop_sim_ma:?}mA actual {pyro_loop_actual_ma:?} mA");
+        }
         sleep(Duration::from_millis(125)).await;
         pyro_loop_actual_ma = read_pyro_420ma_value(&mut ctx).await?;
-        // println!("pyro sim {pyro_loop_sim_ma:?}mA actual {pyro_loop_actual_ma:?} mA");
+
+        sleep(Duration::from_millis(125)).await;
+        let (elec_volts, elec_milliamps) = read_electrode_pair_iv_adc(&mut ctx).await?;
+        // println!("electrode {elec_volts:?} V, {elec_milliamps:?} mA");
 
         //TODO recalculate ideal electrode drive current
         sleep(Duration::from_millis(125)).await;
-        elecdrive_actual_ma = set_precision_current_drive(&mut ctx, elecdrive_milliamps).await?;
+        elecdrive_actual_ma = set_electrode_current_drive(&mut ctx, elecdrive_milliamps).await?;
+
 
         let timestamp = chrono::Utc::now().timestamp();
         let log_line = format!( "{},{},{},{},{},{},{},{},{},{}",
@@ -176,7 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sleep(Duration::from_millis(125)).await;
     set_pyro_420ma_drive(&mut ctx, 0f32).await?;
     sleep(Duration::from_millis(125)).await;
-    set_precision_current_drive(&mut ctx,0f32).await?;
+    set_electrode_current_drive(&mut ctx,0f32).await?;
 
     ctx.disconnect().await?;
 
