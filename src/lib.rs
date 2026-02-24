@@ -23,12 +23,13 @@ use std::time::Duration;
 pub const NODEID_BROADCAST_0: u8 = 0x00;
 pub const NODEID_DEFAULT: u8 = 0x01; // The Modbus node ID that most devices default to
 pub const NODEID_N4VIA02_IV_ADC: u8 = 0x1A; 
+pub const NODEID_WA8TAI_IV_ADC: u8 = 0x1B; // TODO Waveshare WA8TAI 8CH IV ADC
 pub const NODEID_N4AIA04_IV_ADC: u8 = 0x1E;
 pub const NODEID_YKDAQ1402_IV_ADC: u8 = 0x1F;
 pub const NODEID_YKPVCCS010_CURR_SRC: u8 = 0x2F;
 pub const NODEID_YKKTC1202_DUAL_TK: u8 = 0x3F;
 pub const NODEID_N4IOA01_CURR_GEN: u8 = 0x4A; // 4-20 mA current loop source (signal generator)
-pub const NODEID_PYRO_CURR_GEN: u8 = 0x4F; // TODO switching to new current loop signal generator
+pub const NODEID_WA26419_8CH_DAC: u8 = 0x4F; // TODO Waveshare 8CH analog output (0-20 mA)
 pub const NODEID_QUAD_RELAY: u8 = 0x5F; // TODO not yet programmed into relay board
 pub const NODEID_MAX: u8 = 0x7F;
 
@@ -44,7 +45,7 @@ pub const REG_IV_ADC_2CH_VALS: u16 = 0x00; // Where 2CH IV ADC stores read value
 pub const REG_N4VIA02_CURR_VALS: u16 = 0x00; // Where N4VIA02 stores two current values
 pub const REG_N4VIA02_VOLT_VALS: u16 = 0x20; // Where N4VIA02 stores two voltage values
 pub const REG_NODEID_N4IOA01: u16 = 0x0E; 
-pub const REG_NODEID_PYRO_CURR_GEN:u16 = 0x04; // TODO wrong! node ID may not be settable for Taidacent-B0B7HLZ6B4 
+pub const REG_NODEID_WAVESHARE_V2:u16 = 0x4000; // TODO ensure this value is set on all Waveshare devices
 pub const REG_N4IOA01_CURR_VAL: u16 = 0x00;
 pub const REG_YKKTC1202_TEMP_VALS: u16 = 0x00; // The dual RTK's temperature values
 pub const REG_YKKTC1202_VALIDITY: u16 = 0x10; // The dual RTK's thermocouple connection state
@@ -101,7 +102,7 @@ pub async fn read_ykdaq1402_iv_adc(ctx: &mut tokio_modbus::client::Context)
     let ch1_value = registers_to_i32(&iv_adc_vals, 0);
     let verified_volts = (ch1_value as f32) / 10000.0; // resolution is 0.1 mV for 10V range
     let ch2_value = registers_to_i32(&iv_adc_vals, 2);
-    let verified_milliamps = (ch2_value as f32)/ 10.0; // resolution is 0.1 mA for 5A range
+    let verified_milliamps: f32 = (ch2_value as f32)/ 10.0; // resolution is 0.1 mA for 5A range
 
     // println!(" YKDAQ1402 ch1_value: {ch1_value:?} = {verified_volts:?} V");
     // println!(" YKDAQ1402 ch2_value: {ch2_value:?} = {verified_milliamps:?} mA");
@@ -180,6 +181,26 @@ pub async fn read_n4aia04_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
     Ok((0f32, ch1_milliamps))
 }
 
+
+pub fn set_wa26419_dac_config(ctx: &mut tokio_modbus::client::Context)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    Ok(())
+} 
+/**
+ * Read Waveshare WA8TAI 8CH analog IV ADC.
+ * Returns a value that is either milliamps or volts, depending on how the channel was configured
+ */
+pub async fn read_wa8tai_iv(ctx: &mut tokio_modbus::client::Context, channel: u8)
+-> Result<f32, Box<dyn std::error::Error>> 
+{
+    let chan_address: u16 = 0x0000 + (channel -1) as u16;
+    ctx.set_slave(Slave(NODEID_WA8TAI_IV_ADC)); 
+    let resp: Vec<u16> = ctx.read_input_registers(chan_address, 1).await??;
+    //output range 4000~20000, unit uA;
+    let converted_val = (resp[0] as f32) / 1E3; // either milliamps or volts
+    Ok(converted_val)
+}
 
 /**
  * Set the pyro simulator current loop controller (4-20 mA source) current value

@@ -115,14 +115,48 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_QUAD_RELAY, 0x00, NODEID_QUAD_RELAY).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4VIA02, NODEID_DEFAULT, NODEID_N4VIA02_IV_ADC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4IOA01, NODEID_DEFAULT, NODEID_N4IOA01_CURR_GEN).await?;
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA8TAI_IV_ADC).await?;
 
-    // the 3--4th byte of the transmitted frame represents the relay address,the relay 1-relay 8 address are respectively:
-    // relay 0x0000,0x0001,0x0002,0x0003,0x0004,0x0005,0x0006,0x0007.
-    // eg Turn on the relay no.2 (manual mode) Send: FF 05 00 01 FF 00 C8 24
+    // cofigure input modes for WA8TAI_IV_AD: Evens are current, odds are voltage
+    // configure_wa8tai_mixed_adc_modes(&mut ctx).await?;
 
+    // TODO ---
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_BROADCAST_0, NODEID_WA26419_8CH_DAC).await?;
 
+    let builder = tokio_serial::new(tty_path, baud_rate);
+    let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
+    let ma = read_wa8tai_iv(&mut ctx, 2).await?;
+    println!("test milliamp value: {ma:?}");
     Ok(())
 }
 
+/**
+ * Configure ADC with odd channels Voltage, even channels Amps
+ */
+async fn configure_wa8tai_mixed_adc_modes(ctx: &mut tokio_modbus::client::Context)
+-> Result<(), Box<dyn std::error::Error>>  {
+    let volt_mode_10v: u16 = 0x0000; // Range 0~10V, output range 0~5000 or 0~10000, unit mV;
+    let amp_mode_0420: u16 = 0x0003; // Range 4~20mA, output range 4000~20000, unit uA;
 
+    // 0x0000: Range 0~5V, output range 0~5000 or 0~10000, unit mV;
+    // 0x0001: Range 1~5V, output range 1000~5000 or 2~10V, output range 2000~10000, unit mV;
+    // 0x0002: Range 0~20mA, output range 0~20000, unit uA;
+    // 0x0003: Range 4~20mA, output range 4000~20000, unit uA;
+    // 0x0004: Direct output of numerical code, output range 0~4096, requires linear conversion to obtain actual measured voltage and current;z
+
+    ctx.set_slave(Slave(NODEID_WA8TAI_IV_ADC)); 
+    ctx.write_single_register(0x1000, volt_mode_10v).await??;
+    ctx.write_single_register(0x1001, amp_mode_0420).await??;
+    ctx.write_single_register(0x1002, volt_mode_10v).await??;
+    ctx.write_single_register(0x1003, amp_mode_0420).await??;
+    ctx.write_single_register(0x1004, volt_mode_10v).await??;
+    ctx.write_single_register(0x1005, amp_mode_0420).await??;
+    ctx.write_single_register(0x1006, volt_mode_10v).await??;
+    ctx.write_single_register(0x1007, amp_mode_0420).await??;
+
+    let resp = ctx.read_holding_registers(0x1000, 8).await??;
+    println!("wa8tai config response: {resp:?}");
+
+    Ok(())
+}
 
