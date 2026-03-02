@@ -23,7 +23,7 @@ use std::time::Duration;
 pub const NODEID_BROADCAST_0: u8 = 0x00;
 pub const NODEID_DEFAULT: u8 = 0x01; // The Modbus node ID that most devices default to
 pub const NODEID_N4VIA02_IV_ADC: u8 = 0x1A; 
-pub const NODEID_WA8TAI_IV_ADC: u8 = 0x1B; // TODO Waveshare WA8TAI 8CH IV ADC
+pub const NODEID_WA8TAI_IV_ADC: u8 = 0x1B; // Waveshare WA8TAI 8CH IV ADC
 pub const NODEID_N4AIA04_IV_ADC: u8 = 0x1E;
 pub const NODEID_YKDAQ1402_IV_ADC: u8 = 0x1F;
 pub const NODEID_YKPVCCS010_CURR_SRC: u8 = 0x2F;

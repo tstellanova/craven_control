@@ -115,18 +115,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_QUAD_RELAY, 0x00, NODEID_QUAD_RELAY).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4VIA02, NODEID_DEFAULT, NODEID_N4VIA02_IV_ADC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4IOA01, NODEID_DEFAULT, NODEID_N4IOA01_CURR_GEN).await?;
+    
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA8TAI_IV_ADC).await?;
-
     // cofigure input modes for WA8TAI_IV_AD: Evens are current, odds are voltage
     // configure_wa8tai_mixed_adc_modes(&mut ctx).await?;
+    // let builder = tokio_serial::new(tty_path, baud_rate);
+    // let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
+    // let ma = read_wa8tai_iv(&mut ctx, 2).await?;
+    // println!("test milliamp value: {ma:?}");
 
     // TODO ---
-    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_BROADCAST_0, NODEID_WA26419_8CH_DAC).await?;
+    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA26419_8CH_DAC).await?;
 
-    let builder = tokio_serial::new(tty_path, baud_rate);
-    let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
-    let ma = read_wa8tai_iv(&mut ctx, 2).await?;
-    println!("test milliamp value: {ma:?}");
+
+
     Ok(())
 }
 
