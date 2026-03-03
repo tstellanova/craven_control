@@ -48,20 +48,22 @@ async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, mi
 /**
  * Set the pyro simulator current loop controller (4-20 mA source) current value
  */
-async fn set_pyro_420ma_drive(ctx: &mut tokio_modbus::client::Context,  milliamps: f32) 
+async fn set_pyro_420ma_drive(ctx: &mut tokio_modbus::client::Context,  milliamps: f64) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    set_n4ioa01_0420_current_loop_drive(ctx, milliamps).await
+    // set_n4ioa01_0420_current_loop_drive(ctx, milliamps).await
+    set_wa26419_0420_current_loop_drive(ctx, 4, milliamps).await
 }
 
 /**
  * Read the actual current flowing through the pyrometer loop
  */
 async fn read_pyro_420ma_value(ctx: &mut tokio_modbus::client::Context)
--> Result<f32, Box<dyn std::error::Error>> 
+-> Result<f64, Box<dyn std::error::Error>> 
 {
-    let resp = read_n4aia04_420_iv_adc(ctx).await?;
-    Ok(resp.1)
+    let val = read_wa8tai_iv(ctx,2).await?;
+    // let adjusted_val = val - 0.014;
+    Ok(val)
 }
 
 /**
@@ -73,11 +75,17 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     // measures dual type K thermocouple signal
     ping_one_modbus_node_id(ctx, NODEID_YKKTC1202_DUAL_TK, REG_NODEID_YKKTC1202_DUAL_TK).await?;
 
+    // // pyro 4-20 mA current loop source (simulates pyrometer)
+    // ping_one_modbus_node_id(ctx,NODEID_N4IOA01_CURR_GEN, REG_NODEID_N4IOA01).await?;
+
+    // // pyro 4-20 mA current loop ammeter (verifies pyrometer simulation signal)
+    // ping_one_modbus_node_id(ctx,NODEID_N4AIA04_IV_ADC, REG_NODEID_N4AIA04).await?;
+
     // pyro 4-20 mA current loop source (simulates pyrometer)
-    ping_one_modbus_node_id(ctx,NODEID_N4IOA01_CURR_GEN, REG_NODEID_N4IOA01).await?;
+    ping_one_modbus_node_id(ctx,NODEID_WA26419_8CH_DAC, REG_NODEID_WAVESHARE_V2).await?;
 
     // pyro 4-20 mA current loop ammeter (verifies pyrometer simulation signal)
-    ping_one_modbus_node_id(ctx,NODEID_N4AIA04_IV_ADC, REG_NODEID_N4AIA04).await?;
+    ping_one_modbus_node_id(ctx,NODEID_WA8TAI_IV_ADC, REG_NODEID_WAVESHARE_V2).await?;
 
     // supplies current to the electrode probe
     ping_one_modbus_node_id(ctx,NODEID_YKPVCCS010_CURR_SRC, REG_NODEID_YKPVCCS010_CURR_SRC).await?;
@@ -107,14 +115,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     writeln!(csv_writer, "{}", CSV_HEADER)?;
     println!("{}",CSV_HEADER);
 
-    const MIN_PYRO_MA:f32 = 4f32;
-    const MAX_PYRO_MA:f32 = 20f32;
-    const MAX_PYRO_TEMP_C:f32 = 1000f32;
-    const PYRO_CELSIUS_RANGE:f32 = MAX_PYRO_TEMP_C - 0f32;
-    const MILLIAMPS_PER_CELSIUS:f32 = (MAX_PYRO_MA - MIN_PYRO_MA)/PYRO_CELSIUS_RANGE; //TODO check correctness of this
+    const MIN_PYRO_MA:f64 = 4f64;
+    const MAX_PYRO_MA:f64 = 20f64;
+    const MIN_PYRO_TEMP_C:f64 = 0f64;
+    const MAX_PYRO_TEMP_C:f64 = 1000f64;
+    const PYRO_CELSIUS_RANGE:f64 = MAX_PYRO_TEMP_C - MIN_PYRO_TEMP_C;
+    const MILLIAMPS_PER_CELSIUS:f64 = (MAX_PYRO_MA - MIN_PYRO_MA)/PYRO_CELSIUS_RANGE; //TODO check correctness of this
+    const PYRO_SIM_MA_CORRECTION: f64 = -0.375; // required to correct current loop value seen by induction heater
     let mut cur_core_temperature = 20f32;
     let mut pyro_loop_sim_ma = MIN_PYRO_MA;
-    let mut pyro_loop_actual_ma = 0f32;
+    let mut pyro_loop_actual_ma = 0f64;
     let mut elecdrive_milliamps = 2.0f32; //TODO temporary static value
     let mut elecdrive_actual_ma = 0f32;
 
@@ -128,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         r.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
 
-    let mut last_pyro_sim_ma = 3f32;
+    let mut last_pyro_sim_ma = 3f64;
 
     while running.load(Ordering::SeqCst) { 
 
@@ -136,26 +146,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (ch1_tk_opt, ch2_tk_opt) = read_dual_tk_temps(&mut ctx).await?;
         let tk1_c = ch1_tk_opt.unwrap_or(0f32);
         let tk2_c = ch2_tk_opt.unwrap_or(0f32);
-        let avg_core_tk_c = 
+        let mut avg_core_tk_c: f32 = 
             if ch1_tk_opt.is_some() {
                 if ch2_tk_opt.is_some() {  (tk1_c + tk2_c) / 2f32 }
-                else { tk1_c }
+                else { tk1_c.into()}
             }
-            else if ch2_tk_opt.is_some() { tk2_c }
-            else { MAX_PYRO_TEMP_C };
-        // println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
+            else if ch2_tk_opt.is_some() { tk2_c.into() }
+            else { MAX_PYRO_TEMP_C as f32};
+        println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
 
-        pyro_loop_sim_ma = MIN_PYRO_MA + MILLIAMPS_PER_CELSIUS * avg_core_tk_c;
+        // avg_core_tk_c = 770.0; //TODO temp
+        pyro_loop_sim_ma = MIN_PYRO_MA + MILLIAMPS_PER_CELSIUS * (avg_core_tk_c as f64) + PYRO_SIM_MA_CORRECTION; //TODO recalibrate instead??
+        if pyro_loop_sim_ma < 4.0 { pyro_loop_sim_ma = 4.0 };
         // Setting a new current value may cause a short dropout in current:
         // we don't set a new current value unless it's significantly different than previous
         if abs_diff_ne!(last_pyro_sim_ma, pyro_loop_sim_ma, epsilon = 0.01) {
             sleep(Duration::from_millis(125)).await;
             set_pyro_420ma_drive(&mut ctx, pyro_loop_sim_ma).await?;
             last_pyro_sim_ma = pyro_loop_sim_ma;
-            // println!("pyro sim {pyro_loop_sim_ma:?}mA actual {pyro_loop_actual_ma:?} mA");
         }
         sleep(Duration::from_millis(125)).await;
         pyro_loop_actual_ma = read_pyro_420ma_value(&mut ctx).await?;
+        // if abs_diff_ne!(pyro_loop_sim_ma, pyro_loop_actual_ma, epsilon = 0.01) {
+        //     println!("pyro sim {pyro_loop_sim_ma:?} mA actual {pyro_loop_actual_ma:?} mA");
+        // }
 
         sleep(Duration::from_millis(125)).await;
         let (elec_volts, elec_milliamps) = read_electrode_pair_iv_adc(&mut ctx).await?;
@@ -181,7 +195,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Shutting down outputs...");
     sleep(Duration::from_millis(125)).await;
-    set_pyro_420ma_drive(&mut ctx, 0f32).await?;
+    set_pyro_420ma_drive(&mut ctx, 0f64).await?;
     sleep(Duration::from_millis(125)).await;
     set_electrode_current_drive(&mut ctx,0f32).await?;
 

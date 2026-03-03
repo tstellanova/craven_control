@@ -182,25 +182,46 @@ pub async fn read_n4aia04_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
 }
 
 
-pub fn set_wa26419_dac_config(ctx: &mut tokio_modbus::client::Context)
--> Result<(), Box<dyn std::error::Error>> 
-{
-    Ok(())
-} 
+
 /**
  * Read Waveshare WA8TAI 8CH analog IV ADC.
  * Returns a value that is either milliamps or volts, depending on how the channel was configured
  */
 pub async fn read_wa8tai_iv(ctx: &mut tokio_modbus::client::Context, channel: u8)
--> Result<f32, Box<dyn std::error::Error>> 
+-> Result<f64, Box<dyn std::error::Error>> 
 {
-    let chan_address: u16 = 0x0000 + (channel -1) as u16;
+    let chan_address: u16 = 0x0000 + (channel - 1) as u16;
     ctx.set_slave(Slave(NODEID_WA8TAI_IV_ADC)); 
     let resp: Vec<u16> = ctx.read_input_registers(chan_address, 1).await??;
     //output range 4000~20000, unit uA;
-    let converted_val = (resp[0] as f32) / 1E3; // either milliamps or volts
+    let converted_val = (resp[0] as f64) / 1E3; // either milliamps or volts
     Ok(converted_val)
 }
+
+/**
+ * Set the pyro simulator current loop controller (4-20 mA source) current value
+ * Note: channel is 1-8
+ */
+pub async fn set_wa26419_0420_current_loop_drive(ctx: &mut tokio_modbus::client::Context, channel: u8, milliamps: f64) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    let chan_address: u16 = 0x0000 + (channel -1) as u16;
+    ctx.set_slave(Slave(NODEID_WA26419_8CH_DAC)); 
+
+    // this module accepts settings in microamps (mA * 1000)
+    let desired_microamps = (milliamps * 1000.0).round() as u16;
+    println!("setting microamps: {desired_microamps:?}");
+    ctx.write_single_register(chan_address, desired_microamps).await??;
+
+    let resp = ctx.read_holding_registers(chan_address, 1).await??;
+    let verified_microamps = resp[0];
+    if verified_microamps != desired_microamps {
+        println!("desired {desired_microamps:?} verfied {verified_microamps:?}");
+    }
+
+    Ok(())
+}
+
 
 /**
  * Set the pyro simulator current loop controller (4-20 mA source) current value
