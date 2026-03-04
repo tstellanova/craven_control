@@ -1,5 +1,6 @@
 #![allow(unused)]
 
+use std::f32::INFINITY;
 use std::process::exit;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -96,6 +97,15 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     Ok(())
 }
 
+fn current_from_current_density(density: f32) -> f32 
+{
+    // cylindrical surface area of two parallel ideal cylindrical wires,
+    // each 0.7 mm diameter, each with 10 mm submerged into the electrolyate
+    const ELECTRODE_SA_FACTOR: f32 = 2E-5;
+
+    density * ELECTRODE_SA_FACTOR
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to Modbus apparatus via TCP server bridge (a WiFi bridge on our local network)
@@ -111,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}_recorder.csv",start_time))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,TK1_C,TK2_C,avg_C,elecdrive_mA,elecdrive_actual_mA,elec_V,elec_mA,pyro_sim_mA,pyro_actual_mA";
+    const CSV_HEADER: &str =  "epoch_secs,TK1_C,TK2_C,avg_C,elecdrive_mA,elecdrive_actual_mA,elec_V,elec_mA,elec_R,pyro_sim_mA,pyro_actual_mA";
     writeln!(csv_writer, "{}", CSV_HEADER)?;
     println!("{}",CSV_HEADER);
 
@@ -153,9 +163,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             else if ch2_tk_opt.is_some() { tk2_c.into() }
             else { MAX_PYRO_TEMP_C as f32};
-        println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
+        // println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
 
-        // avg_core_tk_c = 770.0; //TODO temp
         pyro_loop_sim_ma = MIN_PYRO_MA + MILLIAMPS_PER_CELSIUS * (avg_core_tk_c as f64) + PYRO_SIM_MA_CORRECTION; //TODO recalibrate instead??
         if pyro_loop_sim_ma < 4.0 { pyro_loop_sim_ma = 4.0 };
         // Setting a new current value may cause a short dropout in current:
@@ -171,21 +180,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         //     println!("pyro sim {pyro_loop_sim_ma:?} mA actual {pyro_loop_actual_ma:?} mA");
         // }
 
+        // recalculate ideal electrode drive current:
+        // calculate current density for about 1 cm long, 0.5 - 0.8 mm OD wires
+        if avg_core_tk_c >= 750.0 && avg_core_tk_c <= 800.0 {
+            let current_density = 0.5 * 100. * 100.; // ideally 0.5 A/cm^2 == 5000 A/m^2
+            elecdrive_milliamps = current_from_current_density(current_density);
+            sleep(Duration::from_millis(125)).await;
+            elecdrive_actual_ma = set_electrode_current_drive(&mut ctx, elecdrive_milliamps).await?;
+        }
+
         sleep(Duration::from_millis(125)).await;
         let (elec_volts, elec_milliamps) = read_electrode_pair_iv_adc(&mut ctx).await?;
-        // println!("electrode {elec_volts:?} V, {elec_milliamps:?} mA");
+        let inter_electrode_resistance = 
+            if elec_milliamps > 0. {
+                // this also covers the case where volts = 0.0, i.e. zero resistance.
+                elec_volts / (elec_milliamps/1000.) 
+            }
+            else {
+                core::f32::INFINITY
+            };
 
-        //TODO recalculate ideal electrode drive current
-        sleep(Duration::from_millis(125)).await;
-        elecdrive_actual_ma = set_electrode_current_drive(&mut ctx, elecdrive_milliamps).await?;
-
+        // TODO terminate the current drive if we determine that resistance is zero (indicating
+        // that the electrode-electrode gap has been bridged by conductive material.
+        const MIN_INTER_ELECTRODE_OHMS: f32 = 0.25;
+        if inter_electrode_resistance < MIN_INTER_ELECTRODE_OHMS  {
+            set_electrode_current_drive(&mut ctx, 0.).await?;
+        }
 
         let timestamp = chrono::Utc::now().timestamp();
-        let log_line = format!( "{},{},{},{},{},{},{},{},{},{}",
+        let log_line = format!( "{},{},{},{},{},{},{},{},{},{},{}",
             timestamp,
             tk1_c, tk2_c, avg_core_tk_c,
             elecdrive_milliamps, elecdrive_actual_ma,
-            elec_volts, elec_milliamps,
+            elec_volts, elec_milliamps, inter_electrode_resistance,
             pyro_loop_sim_ma, pyro_loop_actual_ma
             );
         println!("{}",log_line);
