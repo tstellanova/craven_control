@@ -52,6 +52,7 @@ async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, mi
 async fn set_pyro_420ma_drive(ctx: &mut tokio_modbus::client::Context,  milliamps: f64) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
+    println!("set pyro sim mA: {milliamps:?}");
     // set_n4ioa01_0420_current_loop_drive(ctx, milliamps).await
     set_wa26419_0420_current_loop_drive(ctx, 4, milliamps).await
 }
@@ -63,7 +64,6 @@ async fn read_pyro_420ma_value(ctx: &mut tokio_modbus::client::Context)
 -> Result<f64, Box<dyn std::error::Error>> 
 {
     let val = read_wa8tai_iv(ctx,2).await?;
-    // let adjusted_val = val - 0.014;
     Ok(val)
 }
 
@@ -183,7 +183,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // recalculate ideal electrode drive current:
         // calculate current density for about 1 cm long, 0.5 - 0.8 mm OD wires
         if avg_core_tk_c >= 750.0 && avg_core_tk_c <= 800.0 {
-            let current_density = 0.5 * 100. * 100.; // ideally 0.5 A/cm^2 == 5000 A/m^2
+            let current_density = 0.6 * 100. * 100.; // ideally 0.5 A/cm^2 == 5000 A/m^2
             elecdrive_milliamps = current_from_current_density(current_density);
             sleep(Duration::from_millis(125)).await;
             elecdrive_actual_ma = set_electrode_current_drive(&mut ctx, elecdrive_milliamps).await?;
@@ -191,10 +191,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         sleep(Duration::from_millis(125)).await;
         let (elec_volts, elec_milliamps) = read_electrode_pair_iv_adc(&mut ctx).await?;
+        let notional_ma = f32::max(elec_milliamps, elecdrive_actual_ma);
         let inter_electrode_resistance = 
-            if elec_milliamps > 0. {
+            if notional_ma > 0. {
                 // this also covers the case where volts = 0.0, i.e. zero resistance.
-                elec_volts / (elec_milliamps/1000.) 
+                elec_volts / (notional_ma/1000.) 
             }
             else {
                 core::f32::INFINITY
@@ -213,7 +214,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tk1_c, tk2_c, avg_core_tk_c,
             elecdrive_milliamps, elecdrive_actual_ma,
             elec_volts, elec_milliamps, inter_electrode_resistance,
-            pyro_loop_sim_ma, pyro_loop_actual_ma
+            pyro_loop_sim_ma as f32, pyro_loop_actual_ma as f32
             );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;

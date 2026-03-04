@@ -210,7 +210,7 @@ pub async fn set_wa26419_0420_current_loop_drive(ctx: &mut tokio_modbus::client:
 
     // this module accepts settings in microamps (mA * 1000)
     let desired_microamps = (milliamps * 1000.0).round() as u16;
-    println!("setting microamps: {desired_microamps:?}");
+    // println!("setting microamps: {desired_microamps:?}");
     ctx.write_single_register(chan_address, desired_microamps).await??;
 
     let resp = ctx.read_holding_registers(chan_address, 1).await??;
