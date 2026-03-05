@@ -70,6 +70,9 @@ pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
     combined
 }
 
+/**
+ * Ensure that we can connect with the given Modbus node ID.
+ */
 pub async fn ping_one_modbus_node_id(ctx: &mut tokio_modbus::client::Context, node_id: u8,  reg_node_id: u16) 
     -> Result<(), Box<dyn std::error::Error>>
 {
@@ -98,14 +101,14 @@ pub async fn read_ykdaq1402_iv_adc(ctx: &mut tokio_modbus::client::Context)
     // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_NODEID_YKDAQ1402_IV_ADC, 3).await??;
     // println!(" YKDAQ1402 CFG ({REG_NODEID_YKDAQ1402_IV_ADC:?})[3]: {read_rsp:?}");
     let iv_adc_vals: Vec<u16> = ctx.read_holding_registers(REG_IV_ADC_2CH_VALS, 4).await??;
-    // println!(" YKDAQ1402 VALS ({REG_IV_ADC_2CH_VALS:?})[4]: {iv_adc_vals:?}");
+    println!(" YKDAQ1402 VALS ({REG_IV_ADC_2CH_VALS:?})[4]: {iv_adc_vals:?}");
     let ch1_value = registers_to_i32(&iv_adc_vals, 0);
     let verified_volts = (ch1_value as f32) / 10000.0; // resolution is 0.1 mV for 10V range
     let ch2_value = registers_to_i32(&iv_adc_vals, 2);
     let verified_milliamps: f32 = (ch2_value as f32)/ 10.0; // resolution is 0.1 mA for 5A range
 
-    // println!(" YKDAQ1402 ch1_value: {ch1_value:?} = {verified_volts:?} V");
-    // println!(" YKDAQ1402 ch2_value: {ch2_value:?} = {verified_milliamps:?} mA");
+    println!(" YKDAQ1402 ch1_value: {ch1_value:?} = {verified_volts:?} V");
+    println!(" YKDAQ1402 ch2_value: {ch2_value:?} = {verified_milliamps:?} mA");
     Ok((verified_volts, verified_milliamps))
 }
 
@@ -188,13 +191,16 @@ pub async fn read_n4aia04_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
  * Returns a value that is either milliamps or volts, depending on how the channel was configured
  */
 pub async fn read_wa8tai_iv(ctx: &mut tokio_modbus::client::Context, channel: u8)
--> Result<f64, Box<dyn std::error::Error>> 
+-> Result<f32, Box<dyn std::error::Error>> 
 {
-    let chan_address: u16 = 0x0000 + (channel - 1) as u16;
+    let chan_offset = channel - 1; 
     ctx.set_slave(Slave(NODEID_WA8TAI_IV_ADC)); 
-    let resp: Vec<u16> = ctx.read_input_registers(chan_address, 1).await??;
+    let resp: Vec<u16> = ctx.read_input_registers(0x0000, 8).await??; //read all 8 at once
+    // println!("AIN resp: {resp:?}");
+    let val = resp[chan_offset as usize];
+    // println!("AIN ch {channel:?} val: {val:?}");
     //output range 4000~20000, unit uA;
-    let converted_val = (resp[0] as f64) / 1E3; // either milliamps or volts
+    let converted_val = (val as f32) / 1E3; // either milliamps or volts
     Ok(converted_val)
 }
 
@@ -202,10 +208,10 @@ pub async fn read_wa8tai_iv(ctx: &mut tokio_modbus::client::Context, channel: u8
  * Set the pyro simulator current loop controller (4-20 mA source) current value
  * Note: channel is 1-8
  */
-pub async fn set_wa26419_0420_current_loop_drive(ctx: &mut tokio_modbus::client::Context, channel: u8, milliamps: f64) 
+pub async fn set_wa26419_0420_current_loop_drive(ctx: &mut tokio_modbus::client::Context, channel: u8, milliamps: f32) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    let chan_address: u16 = 0x0000 + (channel -1) as u16;
+    let chan_address: u16 = 0x0000 + (channel - 1) as u16;
     ctx.set_slave(Slave(NODEID_WA26419_8CH_DAC)); 
 
     // this module accepts settings in microamps (mA * 1000)

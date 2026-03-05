@@ -121,8 +121,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let builder = tokio_serial::new(tty_path, baud_rate);
     let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
 
-    // cofigure input modes for WA8TAI_IV_AD: Evens are current, odds are voltage
-    // configure_wa8tai_mixed_adc_modes(&mut ctx).await?;
+    // cofigure channel 1-8 input modes for WA8TAI_IV_AD: Even channels are current, odd channels are voltage
+    configure_wa8tai_mixed_adc_modes(&mut ctx).await?;
 
     // let ma = read_wa8tai_iv(&mut ctx, 2).await?;
     // println!("test milliamp value: {ma:?}");
@@ -151,6 +151,7 @@ async fn configure_wa26419(ctx: &mut tokio_modbus::client::Context)
 async fn configure_wa8tai_mixed_adc_modes(ctx: &mut tokio_modbus::client::Context)
 -> Result<(), Box<dyn std::error::Error>>  {
     let volt_mode_10v: u16 = 0x0000; // Range 0~10V, output range 0~5000 or 0~10000, unit mV;
+    let amp_mode_0020: u16 = 0x0002; // Range 4~20mA, output range 4000~20000, unit uA;
     let amp_mode_0420: u16 = 0x0003; // Range 4~20mA, output range 4000~20000, unit uA;
 
     // 0x0000: Range 0~5V, output range 0~5000 or 0~10000, unit mV;
@@ -158,12 +159,13 @@ async fn configure_wa8tai_mixed_adc_modes(ctx: &mut tokio_modbus::client::Contex
     // 0x0002: Range 0~20mA, output range 0~20000, unit uA;
     // 0x0003: Range 4~20mA, output range 4000~20000, unit uA;
     // 0x0004: Direct output of numerical code, output range 0~4096, requires linear conversion to obtain actual measured voltage and current;z
-
+    println!("select node: {NODEID_WA8TAI_IV_ADC:?}");
     ctx.set_slave(Slave(NODEID_WA8TAI_IV_ADC)); 
     ctx.write_single_register(0x1000, volt_mode_10v).await??;
-    ctx.write_single_register(0x1001, amp_mode_0420).await??;
+    ctx.write_single_register(0x1001, amp_mode_0020).await??;
     ctx.write_single_register(0x1002, volt_mode_10v).await??;
-    ctx.write_single_register(0x1003, amp_mode_0420).await??;
+    ctx.write_single_register(0x1003, amp_mode_0020).await??;
+    
     ctx.write_single_register(0x1004, volt_mode_10v).await??;
     ctx.write_single_register(0x1005, amp_mode_0420).await??;
     ctx.write_single_register(0x1006, volt_mode_10v).await??;

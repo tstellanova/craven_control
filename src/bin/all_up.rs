@@ -34,8 +34,13 @@ async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
 -> Result<(f32, f32), Box<dyn std::error::Error>> 
 {
-   read_ykdaq1402_iv_adc(ctx).await
+  let potential  = read_wa8tai_iv(ctx,1).await?;
+  let current = read_wa8tai_iv(ctx,2).await?;
+
+  Ok((potential, current))
+//    read_ykdaq1402_iv_adc(ctx).await
 }
+
 
 /**
  * Set the output drive current of the test electrodes 
@@ -49,7 +54,7 @@ async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, mi
 /**
  * Set the pyro simulator current loop controller (4-20 mA source) current value
  */
-async fn set_pyro_420ma_drive(ctx: &mut tokio_modbus::client::Context,  milliamps: f64) 
+async fn set_pyro_420ma_drive(ctx: &mut tokio_modbus::client::Context,  milliamps: f32) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
     println!("set pyro sim mA: {milliamps:?}");
@@ -61,9 +66,9 @@ async fn set_pyro_420ma_drive(ctx: &mut tokio_modbus::client::Context,  milliamp
  * Read the actual current flowing through the pyrometer loop
  */
 async fn read_pyro_420ma_value(ctx: &mut tokio_modbus::client::Context)
--> Result<f64, Box<dyn std::error::Error>> 
+-> Result<f32, Box<dyn std::error::Error>> 
 {
-    let val = read_wa8tai_iv(ctx,2).await?;
+    let val = read_wa8tai_iv(ctx,4).await?;
     Ok(val)
 }
 
@@ -92,7 +97,7 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     ping_one_modbus_node_id(ctx,NODEID_YKPVCCS010_CURR_SRC, REG_NODEID_YKPVCCS010_CURR_SRC).await?;
 
     // measures the voltage at and current flowing through electrode probe
-    ping_one_modbus_node_id(ctx, NODEID_YKDAQ1402_IV_ADC, REG_NODEID_YKDAQ1402_IV_ADC).await?;
+    // ping_one_modbus_node_id(ctx, NODEID_YKDAQ1402_IV_ADC, REG_NODEID_YKDAQ1402_IV_ADC).await?;
 
     Ok(())
 }
@@ -125,18 +130,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     writeln!(csv_writer, "{}", CSV_HEADER)?;
     println!("{}",CSV_HEADER);
 
-    const MIN_PYRO_MA:f64 = 4f64;
-    const MAX_PYRO_MA:f64 = 20f64;
-    const MIN_PYRO_TEMP_C:f64 = 0f64;
-    const MAX_PYRO_TEMP_C:f64 = 1000f64;
-    const PYRO_CELSIUS_RANGE:f64 = MAX_PYRO_TEMP_C - MIN_PYRO_TEMP_C;
-    const MILLIAMPS_PER_CELSIUS:f64 = (MAX_PYRO_MA - MIN_PYRO_MA)/PYRO_CELSIUS_RANGE; //TODO check correctness of this
-    const PYRO_SIM_MA_CORRECTION: f64 = -0.375; // required to correct current loop value seen by induction heater
-    let mut cur_core_temperature = 20f32;
+    const MIN_PYRO_MA:f32 = 4.;
+    const MAX_PYRO_MA:f32 = 20.;
+    const MIN_PYRO_TEMP_C:f32 = 0.;
+    const MAX_PYRO_TEMP_C:f32 = 1000.;
+    const PYRO_CELSIUS_RANGE:f32 = MAX_PYRO_TEMP_C - MIN_PYRO_TEMP_C;
+    const MILLIAMPS_PER_CELSIUS:f32 = (MAX_PYRO_MA - MIN_PYRO_MA)/PYRO_CELSIUS_RANGE; 
+    const PYRO_SIM_MA_CORRECTION: f32 = -0.375; // required to correct current loop value seen by induction heater
+    let mut cur_core_temperature = 20.;
     let mut pyro_loop_sim_ma = MIN_PYRO_MA;
-    let mut pyro_loop_actual_ma = 0f64;
-    let mut elecdrive_milliamps = 2.0f32; //TODO temporary static value
-    let mut elecdrive_actual_ma = 0f32;
+    let mut pyro_loop_actual_ma = 0.;
+    let mut elecdrive_milliamps = 0.; 
+    let mut last_elecdrive_ma = 0.;
+    let mut elecdrive_actual_ma = 0.;
 
     // Create an AtomicBool flag protected by Arc for thread-safe sharing
     let running = Arc::new(AtomicBool::new(true));
@@ -148,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         r.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
 
-    let mut last_pyro_sim_ma = 3f64;
+    let mut last_pyro_sim_ma = 3.;
 
     while running.load(Ordering::SeqCst) { 
 
@@ -165,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             else { MAX_PYRO_TEMP_C as f32};
         // println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
 
-        pyro_loop_sim_ma = MIN_PYRO_MA + MILLIAMPS_PER_CELSIUS * (avg_core_tk_c as f64) + PYRO_SIM_MA_CORRECTION; //TODO recalibrate instead??
+        pyro_loop_sim_ma = MIN_PYRO_MA + MILLIAMPS_PER_CELSIUS * avg_core_tk_c  + PYRO_SIM_MA_CORRECTION; //TODO recalibrate instead??
         if pyro_loop_sim_ma < 4.0 { pyro_loop_sim_ma = 4.0 };
         // Setting a new current value may cause a short dropout in current:
         // we don't set a new current value unless it's significantly different than previous
@@ -181,32 +187,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // }
 
         // recalculate ideal electrode drive current:
-        // calculate current density for about 1 cm long, 0.5 - 0.8 mm OD wires
-        if avg_core_tk_c >= 750.0 && avg_core_tk_c <= 800.0 {
-            let current_density = 0.6 * 100. * 100.; // ideally 0.5 A/cm^2 == 5000 A/m^2
+        // calculate current density for about 10 mm long, 0.7 mm average OD wires
+        if avg_core_tk_c >= 750. && avg_core_tk_c <= 800. {
+            let current_density = 0.6 * 100. * 100.; // ideally around 0.5 A/cm^2 == 5000 A/m^2
             elecdrive_milliamps = current_from_current_density(current_density);
-            sleep(Duration::from_millis(125)).await;
-            elecdrive_actual_ma = set_electrode_current_drive(&mut ctx, elecdrive_milliamps).await?;
+            if abs_diff_ne!(last_elecdrive_ma, elecdrive_milliamps, epsilon = 0.001) {
+                println!("new elecdrive_milliamps: {elecdrive_milliamps:?}");
+                sleep(Duration::from_millis(125)).await;
+                elecdrive_actual_ma = set_electrode_current_drive(&mut ctx, elecdrive_milliamps).await?;
+                last_elecdrive_ma = elecdrive_milliamps;
+            }
         }
 
         sleep(Duration::from_millis(125)).await;
         let (elec_volts, elec_milliamps) = read_electrode_pair_iv_adc(&mut ctx).await?;
-        let notional_ma = f32::max(elec_milliamps, elecdrive_actual_ma);
+        let estd_electrode_ma = f32::max(elec_milliamps, elecdrive_actual_ma);
         let inter_electrode_resistance = 
-            if notional_ma > 0. {
+            if estd_electrode_ma > 0. {
                 // this also covers the case where volts = 0.0, i.e. zero resistance.
-                elec_volts / (notional_ma/1000.) 
+                elec_volts / (estd_electrode_ma/1000.) 
             }
             else {
                 core::f32::INFINITY
             };
 
-        // TODO terminate the current drive if we determine that resistance is zero (indicating
-        // that the electrode-electrode gap has been bridged by conductive material.
+        // Terminate the current drive if we determine that resistance is zero (indicating
+        // that the electrode-electrode gap has been bridged by conductive material).
         const MIN_INTER_ELECTRODE_OHMS: f32 = 0.25;
         if inter_electrode_resistance < MIN_INTER_ELECTRODE_OHMS  {
             set_electrode_current_drive(&mut ctx, 0.).await?;
         }
+
+        // eg: 1772753988,20.2,22.5,770,1.75,1.8,1.717,0,953.8889,4,3.893
 
         let timestamp = chrono::Utc::now().timestamp();
         let log_line = format!( "{},{},{},{},{},{},{},{},{},{},{}",
@@ -223,7 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Shutting down outputs...");
     sleep(Duration::from_millis(125)).await;
-    set_pyro_420ma_drive(&mut ctx, 0f64).await?;
+    set_pyro_420ma_drive(&mut ctx, 0.).await?;
     sleep(Duration::from_millis(125)).await;
     set_electrode_current_drive(&mut ctx,0f32).await?;
 
