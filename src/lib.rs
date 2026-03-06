@@ -125,24 +125,17 @@ pub async fn set_ykpvccs0100_current_drive(ctx: &mut tokio_modbus::client::Conte
     // println!("set_precision_current_drive: {milliamps:?} mA");
 
     ctx.set_slave(Slave(NODEID_YKPVCCS010_CURR_SRC)); 
-    // println!("Reading existing drive current value");
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_ADDR_DRIVE_MILLIAMPS, 1).await??;
-    // println!("existing current read_rsp: {read_rsp:?}");
-    // let original_ma_val = read_rsp[0];
 
-    let out_ma_setting: u16 = (milliamps/0.1).round() as u16;
+    // precision is 0.1 mA
+    let out_ma_setting: u16 = (10.0 * milliamps).round() as u16;
     // println!("writing val of : {}", out_ma_setting);
     ctx.write_single_register(REG_ADDR_DRIVE_MILLIAMPS, out_ma_setting).await??;
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_ADDR_DRIVE_MILLIAMPS, 1).await??;
-    // let new_ma_val = read_rsp[0];
-    // println!(" prec old: {original_ma_val:?} new: {new_ma_val:?}");
+
 
     sleep(Duration::from_millis(125)).await; // TODO sufficient settling time?
     let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_ADDR_MONITOR_MILLIAMPS, 1).await??;
     let actual_ma = (read_rsp[0] as f32)/10.0;// precision is 0.1 mA
-    // println!(" prec old: {original_ma_val:?} new: {new_ma_val:?} measured: {actual_ma:?}");
 
-    // // println!(" prec measured: {actual_ma:?} mA");
 
     Ok(actual_ma)
 }
