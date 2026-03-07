@@ -190,18 +190,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // recalculate ideal electrode drive current:
         // calculate current density for about 10 mm long, 0.7 mm average OD wires
-        if avg_core_tk_c >= 750. && avg_core_tk_c <= 800. {
+        if avg_core_tk_c >= 725. && avg_core_tk_c <= 800. {
             let current_density = 0.7 * 100. * 100.; // ideally around 0.7 A/cm^2 == 7000 A/m^2
             eleco_ma = current_from_current_density(current_density);
             //TODO for now we force the current to 1 mA minimum
             if eleco_ma < 1. {
                 eleco_ma = 1.;
             }
-            if abs_diff_ne!(last_eleco_ma, eleco_ma, epsilon = 0.01) {
-                sleep(Duration::from_millis(125)).await;
-                eleco_actual_ma = set_electrode_current_drive(&mut ctx, eleco_ma).await?;
-                last_eleco_ma = eleco_ma;
-            }
+        }
+        else {
+            eleco_ma = 0.;
+        }
+
+        if abs_diff_ne!(last_eleco_ma, eleco_ma, epsilon = 0.01) {
+            sleep(Duration::from_millis(125)).await;
+            eleco_actual_ma = set_electrode_current_drive(&mut ctx, eleco_ma).await?;
+            last_eleco_ma = eleco_ma;
         }
 
         sleep(Duration::from_millis(125)).await;
