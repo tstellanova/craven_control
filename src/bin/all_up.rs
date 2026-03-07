@@ -34,11 +34,12 @@ async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
 -> Result<(f32, f32), Box<dyn std::error::Error>> 
 {
+//    read_ykdaq1402_iv_adc(ctx).await
+
   let potential  = read_wa8tai_iv(ctx,1).await?;
   let current = read_wa8tai_iv(ctx,2).await?;
 
   Ok((potential, current))
-//    read_ykdaq1402_iv_adc(ctx).await
 }
 
 
@@ -47,6 +48,7 @@ async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
  */
 async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<f32, Box<dyn std::error::Error>> 
 {
+    println!("new eleco_ma: {milliamps:?}");
     set_ykpvccs0100_current_drive(ctx, milliamps).await
 }
 
@@ -104,11 +106,11 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
 
 fn current_from_current_density(density: f32) -> f32 
 {
-    // cylindrical surface area of two parallel ideal cylindrical wires,
-    // each 0.7 mm diameter, each with 10 mm submerged into the electrolyate
-    const ELECTRODE_SA_FACTOR: f32 = 2E-5;
+    // 2 * pi * r * h
+    // assume 0.8 mm wire OD, 0.4 mm radius, 10 mm height
+    const ELECTRODE_SA_FACTOR: f64 = (2. * std::f64::consts::PI) * (0.4E-3 * 10E-3); 
 
-    density * ELECTRODE_SA_FACTOR
+    (density as f64 * ELECTRODE_SA_FACTOR) as f32
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -126,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}_recorder.csv",start_time))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,TK1_C,TK2_C,avg_C,elecdrive_mA,elecdrive_actual_mA,elec_V,elec_mA,elec_R,pyro_sim_mA,pyro_actual_mA";
+    const CSV_HEADER: &str =  "epoch_secs,TK1_C,TK2_C,avg_C,eleco_mA,eleco_actual_mA,elec_V,elec_R,pyro_sim_mA,pyro_actual_mA";
     writeln!(csv_writer, "{}", CSV_HEADER)?;
     println!("{}",CSV_HEADER);
 
@@ -140,9 +142,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cur_core_temperature = 20.;
     let mut pyro_loop_sim_ma = MIN_PYRO_MA;
     let mut pyro_loop_actual_ma = 0.;
-    let mut elecdrive_milliamps = 0.; 
-    let mut last_elecdrive_ma = 0.;
-    let mut elecdrive_actual_ma = 0.;
+    let mut eleco_ma = 0.; 
+    let mut last_eleco_ma = 0.;
+    let mut eleco_actual_ma = 0.;
 
     // Create an AtomicBool flag protected by Arc for thread-safe sharing
     let running = Arc::new(AtomicBool::new(true));
@@ -189,19 +191,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // recalculate ideal electrode drive current:
         // calculate current density for about 10 mm long, 0.7 mm average OD wires
         if avg_core_tk_c >= 750. && avg_core_tk_c <= 800. {
-            let current_density = 0.6 * 100. * 100.; // ideally around 0.5 A/cm^2 == 5000 A/m^2
-            elecdrive_milliamps = current_from_current_density(current_density);
-            if abs_diff_ne!(last_elecdrive_ma, elecdrive_milliamps, epsilon = 0.001) {
-                println!("new elecdrive_milliamps: {elecdrive_milliamps:?}");
+            let current_density = 0.7 * 100. * 100.; // ideally around 0.7 A/cm^2 == 7000 A/m^2
+            eleco_ma = current_from_current_density(current_density);
+            //TODO for now we force the current to 1 mA minimum
+            if eleco_ma < 1. {
+                eleco_ma = 1.;
+            }
+            if abs_diff_ne!(last_eleco_ma, eleco_ma, epsilon = 0.01) {
                 sleep(Duration::from_millis(125)).await;
-                elecdrive_actual_ma = set_electrode_current_drive(&mut ctx, elecdrive_milliamps).await?;
-                last_elecdrive_ma = elecdrive_milliamps;
+                eleco_actual_ma = set_electrode_current_drive(&mut ctx, eleco_ma).await?;
+                last_eleco_ma = eleco_ma;
             }
         }
 
         sleep(Duration::from_millis(125)).await;
         let (elec_volts, elec_milliamps) = read_electrode_pair_iv_adc(&mut ctx).await?;
-        let estd_electrode_ma = f32::max(elec_milliamps, elecdrive_actual_ma);
+        // TODO currently elec_milliamps is not recording correctly
+        let estd_electrode_ma = f32::max(elec_milliamps, eleco_actual_ma);
         let inter_electrode_resistance = 
             if estd_electrode_ma > 0. {
                 // this also covers the case where volts = 0.0, i.e. zero resistance.
@@ -213,19 +219,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Terminate the current drive if we determine that resistance is zero (indicating
         // that the electrode-electrode gap has been bridged by conductive material).
-        const MIN_INTER_ELECTRODE_OHMS: f32 = 0.25;
+        const MIN_INTER_ELECTRODE_OHMS: f32 = 5.;
         if inter_electrode_resistance < MIN_INTER_ELECTRODE_OHMS  {
             set_electrode_current_drive(&mut ctx, 0.).await?;
         }
 
-        // eg: 1772753988,20.2,22.5,770,1.75,1.8,1.717,0,953.8889,4,3.893
+        // eg: 1772753988,20.2,22.5,770,1.75,1.8,1.717,953.8889,4,3.893
 
         let timestamp = chrono::Utc::now().timestamp();
-        let log_line = format!( "{},{},{},{},{},{},{},{},{},{},{}",
+        let log_line = format!( "{},{},{},{},{},{},{},{},{},{}",
             timestamp,
             tk1_c, tk2_c, avg_core_tk_c,
-            elecdrive_milliamps, elecdrive_actual_ma,
-            elec_volts, elec_milliamps, inter_electrode_resistance,
+            eleco_ma, eleco_actual_ma,
+            elec_volts, inter_electrode_resistance,
             pyro_loop_sim_ma as f32, pyro_loop_actual_ma as f32
             );
         println!("{}",log_line);
@@ -237,7 +243,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sleep(Duration::from_millis(125)).await;
     set_pyro_420ma_drive(&mut ctx, 0.).await?;
     sleep(Duration::from_millis(125)).await;
-    set_electrode_current_drive(&mut ctx,0f32).await?;
+    set_electrode_current_drive(&mut ctx,0.).await?;
 
     ctx.disconnect().await?;
 
