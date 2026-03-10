@@ -190,7 +190,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // recalculate ideal electrode drive current:
         // calculate current density for about 10 mm long, 0.7 mm average OD wires
-        if avg_core_tk_c >= 725. && avg_core_tk_c <= 800. {
+        if avg_core_tk_c > 720. && avg_core_tk_c < 810. {
             let current_density = 0.7 * 100. * 100.; // ideally around 0.7 A/cm^2 == 7000 A/m^2
             eleco_ma = current_from_current_density(current_density);
             //TODO for now we force the current to 1 mA minimum
@@ -218,15 +218,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 elec_volts / (estd_electrode_ma/1000.) 
             }
             else {
-                core::f32::INFINITY
+                1E6
             };
 
         // Terminate the current drive if we determine that resistance is zero (indicating
         // that the electrode-electrode gap has been bridged by conductive material).
-        const MIN_INTER_ELECTRODE_OHMS: f32 = 5.;
-        if inter_electrode_resistance < MIN_INTER_ELECTRODE_OHMS  {
-            set_electrode_current_drive(&mut ctx, 0.).await?;
-        }
+        // const MIN_INTER_ELECTRODE_OHMS: f32 = 5.;
+        // if inter_electrode_resistance < MIN_INTER_ELECTRODE_OHMS  {
+        //     eleco_actual_ma = set_electrode_current_drive(&mut ctx, 0.).await?;
+        //     last_eleco_ma = 0.;
+        // }
 
         // eg: 1772753988,20.2,22.5,770,1.75,1.8,1.717,953.8889,4,3.893
 
