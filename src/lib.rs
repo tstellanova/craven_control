@@ -42,8 +42,8 @@ pub const REG_NODEID_N4AIA04: u16 = 0x0E; // 4-20 mA ADC
 pub const REG_NODEID_YKPVCCS010_CURR_SRC:u16 = 0x00; // Precision current source YK-PVCCS0100/YK-PVCC1000
 pub const REG_SAVE_CFG_YKPVCCS010_CURR_SRC:u16 = 0x02; // Cause YK-PVCCS to persist its parameters.
 pub const REG_IV_ADC_2CH_VALS: u16 = 0x00; // Where 2CH IV ADC stores read values
-pub const REG_N4VIA02_CURR_VALS: u16 = 0x00; // Where N4VIA02 stores two current values
-pub const REG_N4VIA02_VOLT_VALS: u16 = 0x20; // Where N4VIA02 stores two voltage values
+pub const REG_N4VIA02_CURR_VALS: u16 = 0x0000; // Where N4VIA02 stores two current values
+pub const REG_N4VIA02_VOLT_VALS: u16 = 0x0020; // Where N4VIA02 stores two voltage values
 pub const REG_NODEID_N4IOA01: u16 = 0x0E; 
 pub const REG_NODEID_WAVESHARE_V2:u16 = 0x4000; // TODO ensure this value is set on all Waveshare devices
 pub const REG_N4IOA01_CURR_VAL: u16 = 0x00;
@@ -138,11 +138,13 @@ pub async fn set_ykpvccs0100_current_drive(ctx: &mut tokio_modbus::client::Conte
 
 
     Ok(actual_ma)
-}
+}    // ping_one_modbus_node_id(ctx,NODEID_N4AIA04_IV_ADC, REG_NODEID_N4AIA04).await?;
 
-pub async fn read_n4_via02_multimeter(ctx: &mut tokio_modbus::client::Context)
--> Result<(), Box<dyn std::error::Error>> 
+
+pub async fn read_n4via02_multimeter(ctx: &mut tokio_modbus::client::Context)
+-> Result<((f32, f32), (f64, f64)), Box<dyn std::error::Error>> 
 {
+    const CURRENT_CONVERSION_FACTOR: f64 = 0.5;
     // println!("Check N4VIA02_IV... ");
     ctx.set_slave(Slave(NODEID_N4VIA02_IV_ADC));
     // let mut ctx_iv_adc: client::Context = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_IV_ADC));
@@ -152,9 +154,12 @@ pub async fn read_n4_via02_multimeter(ctx: &mut tokio_modbus::client::Context)
     // println!(" N4VIA02 NODE ID ({REG_NODEID_N4VIA02:?})[1]: {read_rsp:?}");
     let milliamp_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_CURR_VALS, 2).await??;
     println!(" N4VIA02 mA VALS ({REG_N4VIA02_CURR_VALS:?})[2]: {milliamp_vals:?}");
-    let voltage_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_VOLT_VALS, 2).await??;
-    println!(" N4VIA02 V VALS ({REG_N4VIA02_VOLT_VALS:?})[2]: {voltage_vals:?}");
-    Ok(())
+    let ch0_ma = (milliamp_vals[0] as f64) * CURRENT_CONVERSION_FACTOR;
+    let ch1_ma = (milliamp_vals[1] as f64) * CURRENT_CONVERSION_FACTOR;
+    // let voltage_vals: Vec<u16> = ctx.read_holding_registers(REG_N4VIA02_VOLT_VALS, 2).await??;
+    // println!(" N4VIA02 V VALS ({REG_N4VIA02_VOLT_VALS:?})[2]: {voltage_vals:?}");
+
+    Ok(((0.,0.), (ch0_ma, ch1_ma)))
 }
 
 pub async fn read_n4aia04_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
