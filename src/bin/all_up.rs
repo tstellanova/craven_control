@@ -128,7 +128,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}_recorder.csv",start_time))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,TK1_C,TK2_C,avg_C,eleco_dma,eleco_rma,elec_mma,elec_V,elec_R,pyro_sim_mA,pyro_actual_mA";
+    const CSV_HEADER: &str =  "epoch_secs,TK1_C,TK2_C,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R,pyro_sim_mA,pyro_actual_mA";
     writeln!(csv_writer, "{}", CSV_HEADER)?;
     println!("{}",CSV_HEADER);
 
@@ -142,9 +142,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cur_core_temperature = 20.;
     let mut pyro_loop_sim_ma = MIN_PYRO_MA;
     let mut pyro_loop_actual_ma = 0.;
-    let mut eleco_dma = 0.; 
-    let mut last_eleco_ma = 0.;
-    let mut eleco_rma = 0.;
+    let mut eleco_dma = 0.; // electrode drive current (a value we set)
+    let mut last_eleco_dma = 0.; // prior loop electrode drive current
+    let mut eleco_rma = 0.; // electrode reported drive current (current driver provides this)
+    let mut prior_elecm_volts = 0.; //prior measured volts across electrodes
 
     // Create an AtomicBool flag protected by Arc for thread-safe sharing
     let running = Arc::new(AtomicBool::new(true));
@@ -190,57 +191,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // recalculate ideal electrode drive current:
         // calculate current density for about 10 mm long, 0.7 mm average OD wires
-        if avg_core_tk_c > 720. && avg_core_tk_c < 810. {
+        if avg_core_tk_c > 720. && avg_core_tk_c < 820. {
             // let current_density = 0.7 * 100. * 100.; // ideally around 0.7 A/cm^2 == 7000 A/m^2
             // eleco_ma = current_from_current_density(current_density);
             // We expected voltages between 0.8 and 2.0
 
-            // TODO start with high current and adjust down to reach ~1.7 V potential across electrodes
-            
-            // For now we ramp up the current then rtz when it reaches a peak value
-            eleco_dma += 0.1;
-            if eleco_dma > 4.0 {
-                eleco_dma = 0.1;
+            //  start with high current and adjust down to reach ~1.7 V potential across electrodes
+            if prior_elecm_volts > 1.9 {
+                eleco_dma -= 0.1;
+            }
+            else if prior_elecm_volts < 1.7 {
+                eleco_dma += 0.1;
+            }
+
+            if eleco_dma > 15. {
+                eleco_dma = 15.;
             }
         }
         else {
             eleco_dma = 0.;
         }
 
-        if abs_diff_ne!(last_eleco_ma, eleco_dma, epsilon = 0.01) {
+        if abs_diff_ne!(last_eleco_dma, eleco_dma, epsilon = 0.01) {
             sleep(Duration::from_millis(125)).await;
             eleco_rma = set_electrode_current_drive(&mut ctx, eleco_dma).await?;
-            last_eleco_ma = eleco_dma;
+            last_eleco_dma = eleco_dma;
         }
 
         sleep(Duration::from_millis(125)).await;
-        let (elec_volts, elec_mma) = read_electrode_pair_iv_adc(&mut ctx).await?;
-        let estd_electrode_ma: f32 = if elec_mma > 0. { elec_mma } else { eleco_rma};
+        let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(&mut ctx).await?;
+        let estd_electrode_ma: f32 = if elecm_ma > 0. { elecm_ma } else { eleco_rma};
         let inter_electrode_resistance = 
             if estd_electrode_ma > 0. {
                 // this also covers the case where volts = 0.0, i.e. zero resistance.
-                elec_volts / (estd_electrode_ma/1000.) 
+                elecm_volts / (estd_electrode_ma/1000.) 
             }
             else {
                 60E3 // arbitrary value based on measurement
             };
+        prior_elecm_volts = elecm_volts;
 
         // Terminate the current drive if we determine that resistance is zero (indicating
         // that the electrode-electrode gap has been bridged by conductive material).
         const MIN_INTER_ELECTRODE_OHMS: f32 = 2.;
         if inter_electrode_resistance < MIN_INTER_ELECTRODE_OHMS  {
-            eleco_rma = set_electrode_current_drive(&mut ctx, 0.).await?;
-            last_eleco_ma = 0.;
+            eleco_dma = 0.;
+            eleco_rma = set_electrode_current_drive(&mut ctx, eleco_dma).await?;
+            last_eleco_dma = eleco_dma;
         }
 
-        // eg: 1772753988,20.2,22.5,770,1.75,1.8,1.717,953.8889,4,3.893
 
         let timestamp = chrono::Utc::now().timestamp();
         let log_line = format!( "{},{},{},{},{},{},{},{},{},{},{}",
             timestamp,
             tk1_c, tk2_c, avg_core_tk_c,
-            eleco_dma, eleco_rma, elec_mma,
-            elec_volts, inter_electrode_resistance,
+            eleco_dma, eleco_rma, elecm_ma,
+            elecm_volts, inter_electrode_resistance,
             pyro_loop_sim_ma as f32, pyro_loop_actual_ma as f32
             );
         println!("{}",log_line);
