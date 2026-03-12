@@ -146,6 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut last_eleco_dma = 0.; // prior loop electrode drive current
     let mut eleco_rma = 0.; // electrode reported drive current (current driver provides this)
     let mut prior_elecm_volts = 0.; //prior measured volts across electrodes
+    let mut prior_elecm_ma = 0.;
 
     // Create an AtomicBool flag protected by Arc for thread-safe sharing
     let running = Arc::new(AtomicBool::new(true));
@@ -204,8 +205,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eleco_dma += 0.1;
             }
 
-            if eleco_dma > 15. {
-                eleco_dma = 15.;
+            if prior_elecm_ma >= 20. {
+                eleco_dma -= 0.1;
             }
         }
         else {
@@ -230,6 +231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 60E3 // arbitrary value based on measurement
             };
         prior_elecm_volts = elecm_volts;
+        prior_elecm_ma = elecm_ma;
 
         // Terminate the current drive if we determine that resistance is zero (indicating
         // that the electrode-electrode gap has been bridged by conductive material).
