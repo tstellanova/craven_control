@@ -193,7 +193,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if avg_core_tk_c > 720. && avg_core_tk_c < 810. {
             // let current_density = 0.7 * 100. * 100.; // ideally around 0.7 A/cm^2 == 7000 A/m^2
             // eleco_ma = current_from_current_density(current_density);
+            // We expected voltages between 0.8 and 2.0
 
+            // TODO start with high current and adjust down to reach ~1.7 V potential across electrodes
+            
             // For now we ramp up the current then rtz when it reaches a peak value
             eleco_dma += 0.1;
             if eleco_dma > 4.0 {
