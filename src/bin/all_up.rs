@@ -132,6 +132,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     writeln!(csv_writer, "{}", CSV_HEADER)?;
     println!("{}",CSV_HEADER);
 
+    const MIN_INTER_ELECTRODE_OHMS: f32 = 16.;
+    const INF_INTER_ELECTRODE_OHMS: f32 = 60E3;
     const MIN_PYRO_MA:f32 = 4.;
     const MAX_PYRO_MA:f32 = 20.;
     const MIN_PYRO_TEMP_C:f32 = 0.;
@@ -147,7 +149,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut eleco_rma = 0.; // electrode reported drive current (current driver provides this)
     let mut prior_elecm_volts = 0.; //prior measured volts across electrodes
     let mut prior_elecm_ma = 0.;
-
+    let mut drive_phase = 0;
+    let mut anchoring_phase_start = 0;
+    let mut growth_phase_start = 0;
+    let mut constant_current_target_ma = 0.;
+    let mut prior_inter_electrode_resistance = INF_INTER_ELECTRODE_OHMS;
     // Create an AtomicBool flag protected by Arc for thread-safe sharing
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
@@ -197,17 +203,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // eleco_ma = current_from_current_density(current_density);
             // We expected voltages between 0.8 and 2.0
 
-            //  start with high current and adjust down to reach ~1.7 V potential across electrodes
-            if prior_elecm_volts > 1.9 {
-                eleco_dma -= 0.1;
-            }
-            else if prior_elecm_volts < 1.7 {
-                eleco_dma += 0.1;
-            }
+            match drive_phase {
+                0 => {
+                    drive_phase = 1;
+                    eleco_dma = 12.;
+                    anchoring_phase_start = chrono::Utc::now().timestamp();
+                    println!("start anchor phase at: {anchoring_phase_start:?}");
+                }
+                1 => { // anchoring phase -- constant voltage
+                    drive_phase = 1;
+                    if prior_elecm_volts > 1.65 {
+                        eleco_dma -= 0.05;
+                    }
+                    else if prior_elecm_volts < 1.55 {
+                        eleco_dma += 0.05;
+                    }
+                    else {
+                        let current_gap = last_eleco_dma - eleco_rma;
+                        if current_gap >= 0.5 {
+                            println!("end enchor phase with eleco dma {last_eleco_dma:?} rma {eleco_rma:?}");
+                            // TODO verify: transition to the next phase once we've achieved target voltage
+                            constant_current_target_ma = eleco_rma;
+                            eleco_dma = constant_current_target_ma;
+                            drive_phase = 2;
+                            growth_phase_start = chrono::Utc::now().timestamp();
+                            println!("start growth phase at: {growth_phase_start:?}");
+                        }
+                    }
+                }
+                2 => {  // whisker growth phase: constant current
+                    eleco_dma = constant_current_target_ma;
 
-            if prior_elecm_ma >= 20. {
-                eleco_dma -= 0.1;
-            }
+                    // Terminate the current drive if we determine that resistance is zero (indicating
+                    // that the electrode-electrode gap has been bridged by conductive material).
+                    if prior_elecm_volts < 1.0 ||
+                        prior_inter_electrode_resistance < MIN_INTER_ELECTRODE_OHMS  {
+                        println!("end growth with V {prior_elecm_volts:?} R {prior_inter_electrode_resistance:?}");
+                        drive_phase = 3;
+                        eleco_dma = 0.;
+                        let growth_phase_end = chrono::Utc::now().timestamp();
+                        println!("end growth phase at: {growth_phase_end:?}");
+                    }
+                }
+                _ => {
+                    eleco_dma = 0.;
+                }
+            };
         }
         else {
             eleco_dma = 0.;
@@ -228,19 +269,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 elecm_volts / (estd_electrode_ma/1000.) 
             }
             else {
-                60E3 // arbitrary value based on measurement
+                INF_INTER_ELECTRODE_OHMS // arbitrary value based on measurement
             };
+        prior_inter_electrode_resistance = inter_electrode_resistance;
         prior_elecm_volts = elecm_volts;
         prior_elecm_ma = elecm_ma;
-
-        // Terminate the current drive if we determine that resistance is zero (indicating
-        // that the electrode-electrode gap has been bridged by conductive material).
-        const MIN_INTER_ELECTRODE_OHMS: f32 = 2.;
-        if inter_electrode_resistance < MIN_INTER_ELECTRODE_OHMS  {
-            eleco_dma = 0.;
-            eleco_rma = set_electrode_current_drive(&mut ctx, eleco_dma).await?;
-            last_eleco_dma = eleco_dma;
-        }
 
 
         let timestamp = chrono::Utc::now().timestamp();
