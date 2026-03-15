@@ -211,24 +211,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("start anchor phase at: {anchoring_phase_start:?}");
                 }
                 1 => { // anchoring phase -- constant voltage
-                    drive_phase = 1;
-                    if prior_elecm_volts > 1.65 {
+                    if prior_elecm_volts > 1.5 {
                         eleco_dma -= 0.05;
                     }
-                    else if prior_elecm_volts < 1.55 {
+                    else if prior_elecm_volts < 1.4 {
                         eleco_dma += 0.05;
                     }
-                    else {
-                        let current_gap = last_eleco_dma - eleco_rma;
-                        if current_gap >= 0.5 {
-                            println!("end enchor phase with eleco dma {last_eleco_dma:?} rma {eleco_rma:?}");
-                            // TODO verify: transition to the next phase once we've achieved target voltage
-                            constant_current_target_ma = eleco_rma;
-                            eleco_dma = constant_current_target_ma;
-                            drive_phase = 2;
-                            growth_phase_start = chrono::Utc::now().timestamp();
-                            println!("start growth phase at: {growth_phase_start:?}");
-                        }
+                    let current_gap = last_eleco_dma - eleco_rma;
+                    if current_gap >= 3.0 {
+                        println!("end enchor phase with eleco dma {last_eleco_dma:?} rma {eleco_rma:?}");
+                        // TODO verify: transition to the next phase once we've achieved target voltage
+                        constant_current_target_ma = last_eleco_dma;
+                        eleco_dma = constant_current_target_ma;
+                        drive_phase = 2;
+                        growth_phase_start = chrono::Utc::now().timestamp();
+                        println!("start growth phase at: {growth_phase_start:?}");
                     }
                 }
                 2 => {  // whisker growth phase: constant current
@@ -262,7 +259,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         sleep(Duration::from_millis(125)).await;
         let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(&mut ctx).await?;
-        let estd_electrode_ma: f32 = if elecm_ma > 0. { elecm_ma } else { eleco_rma};
+        let estd_electrode_ma: f32 = 
+            if eleco_dma > 0. {
+                if elecm_ma > 0. { elecm_ma } else { eleco_rma}
+            }  else { 0. };
         let inter_electrode_resistance = 
             if estd_electrode_ma > 0. {
                 // this also covers the case where volts = 0.0, i.e. zero resistance.
