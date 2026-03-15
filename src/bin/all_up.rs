@@ -132,7 +132,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     writeln!(csv_writer, "{}", CSV_HEADER)?;
     println!("{}",CSV_HEADER);
 
-    const MIN_INTER_ELECTRODE_OHMS: f32 = 16.;
+    const MIN_INTER_ELECTRODE_OHMS: f32 = 16. * 1.5;
     const INF_INTER_ELECTRODE_OHMS: f32 = 60E3;
     const MIN_PYRO_MA:f32 = 4.;
     const MAX_PYRO_MA:f32 = 20.;
@@ -218,8 +218,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         eleco_dma += 0.05;
                     }
                     let current_gap = last_eleco_dma - eleco_rma;
-                    if current_gap >= 3.0 {
-                        println!("end enchor phase with eleco dma {last_eleco_dma:?} rma {eleco_rma:?}");
+                    if current_gap >= 2.0 {
+                        println!("end anchor phase with eleco dma {last_eleco_dma:?} rma {eleco_rma:?}");
                         // TODO verify: transition to the next phase once we've achieved target voltage
                         constant_current_target_ma = last_eleco_dma;
                         eleco_dma = constant_current_target_ma;
@@ -231,11 +231,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 2 => {  // whisker growth phase: constant current
                     eleco_dma = constant_current_target_ma;
 
-                    // Terminate the current drive if we determine that resistance is zero (indicating
+                    // Terminate the current drive if we determine that resistance is close to zero (indicating
                     // that the electrode-electrode gap has been bridged by conductive material).
-                    if prior_elecm_volts < 1.0 ||
-                        prior_inter_electrode_resistance < MIN_INTER_ELECTRODE_OHMS  {
-                        println!("end growth with V {prior_elecm_volts:?} R {prior_inter_electrode_resistance:?}");
+                    if prior_inter_electrode_resistance < MIN_INTER_ELECTRODE_OHMS  {
+                        println!("end growth phase with V {prior_elecm_volts:?} R {prior_inter_electrode_resistance:?}");
                         drive_phase = 3;
                         eleco_dma = 0.;
                         let growth_phase_end = chrono::Utc::now().timestamp();
