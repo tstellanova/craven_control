@@ -48,7 +48,7 @@ async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
  */
 async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<f32, Box<dyn std::error::Error>> 
 {
-    println!("new eleco_ma: {milliamps:?}");
+    println!("new eleco_ma: {milliamps:.3}");
     set_ykpvccs0100_current_drive(ctx, milliamps).await
 }
 
@@ -212,17 +212,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             match drive_phase {
                 DrivePhase::Init => {
-                    drive_phase = DrivePhase::Anchoring;
-                    eleco_dma = 5.;
-                    anchoring_phase_start = chrono::Utc::now().timestamp();
-                    println!("start anchor phase at: {anchoring_phase_start:?}");
+                    // drive_phase = DrivePhase::Anchoring;
+                    // eleco_dma = 1.;
+                    // anchoring_phase_start = chrono::Utc::now().timestamp();
+                    // println!("start anchor phase at: {anchoring_phase_start:?}");
+
+                    // TODO experiment with 
+                    constant_current_target_ma = 4.80; //eleco_rma + 0.1;
+                    eleco_dma = constant_current_target_ma;
+                    drive_phase = DrivePhase::Growth;
+                    growth_phase_start = chrono::Utc::now().timestamp();
+                    println!("start growth phase at: {growth_phase_start:?}");
                 }
                 DrivePhase::Anchoring => { // anchoring phase -- constant voltage
-                    if prior_elecm_volts > 1.2 {
-                        eleco_dma -= 0.05;
+                    if prior_elecm_volts > 1.7 {
+                        eleco_dma -= 0.02;
                     }
-                    else if prior_elecm_volts < 1.0 {
-                        eleco_dma += 0.05;
+                    else if prior_elecm_volts < 1.55 {
+                        eleco_dma += 0.02;
                     }
                     let current_gap = last_eleco_dma - eleco_rma;
                     if current_gap >= 0.3 {
@@ -283,7 +290,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
         let timestamp = chrono::Utc::now().timestamp();
-        let log_line = format!( "{},{},{},{},{},{},{},{},{},{},{}",
+        let log_line = format!( "{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.1},{:.1},{:.1}",
             timestamp,
             tk1_c, tk2_c, avg_core_tk_c,
             eleco_dma, eleco_rma, elecm_ma,
