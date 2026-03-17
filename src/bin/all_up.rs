@@ -210,7 +210,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // recalculate ideal electrode drive current:
         // calculate current density for about 10 mm long, 0.7 mm average OD wires
-        if avg_core_tk_c > 740. && avg_core_tk_c < 780. {
+        if prior_inter_electrode_resistance < 8000. ||
+            (avg_core_tk_c > 740. && avg_core_tk_c < 790.) {
 
             match drive_phase {
                 DrivePhase::Init => {
@@ -224,7 +225,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 DrivePhase::Probing => {
                     if eleco_rma >= PROBE_CURRENT_MA  {
                         // TODO allup11 experiment with target current density 
-                        constant_current_target_ma = current_from_current_density_ma(200., 0.8, 10.);
+                        // constant_current_target_ma = current_from_current_density_ma(200., 0.8, 10.);
+                        constant_current_target_ma = 19.; //TODO tmp
                         eleco_dma = constant_current_target_ma;
                         drive_phase = DrivePhase::Growth;
                         growth_phase_start = chrono::Utc::now().timestamp();
