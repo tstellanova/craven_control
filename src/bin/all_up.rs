@@ -116,9 +116,10 @@ fn current_from_current_density_ma(density_ma_cm2: f64, wire_od_mm: f64, wire_le
 
 enum DrivePhase {
     Init = 0,
-    Anchoring = 1, /// Attach initial carbon atoms to cathode surface
-    Growth = 2, /// Growth of carbon chains between electrodes
-    Done = 3,
+    Probing = 1, // check that the electrode is immersed in conductive melt
+    Anchoring = 2, /// Attach initial carbon atoms to cathode surface
+    Growth = 3, /// Growth of carbon chains between electrodes
+    Done = 4,
 } 
 
 #[tokio::main(flavor = "current_thread")]
@@ -150,6 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     const MILLIAMPS_PER_CELSIUS:f32 = (MAX_PYRO_MA - MIN_PYRO_MA)/PYRO_CELSIUS_RANGE; 
     const PYRO_SIM_MA_CORRECTION: f32 = -0.375; // required to correct current loop value seen by induction heater
     const NOMINAL_GROWTH_MA: f32 = 5.;
+    const PROBE_CURRENT_MA: f32 = 1.;
     let mut cur_core_temperature: f64 = 20.;
     let mut pyro_sim_ma = MIN_PYRO_MA;
     let mut pyro_actual_ma = 0.;
@@ -212,17 +214,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             match drive_phase {
                 DrivePhase::Init => {
-                    // drive_phase = DrivePhase::Anchoring;
-                    // eleco_dma = 1.;
-                    // anchoring_phase_start = chrono::Utc::now().timestamp();
-                    // println!("start anchor phase at: {anchoring_phase_start:?}");
-
-                    // TODO experiment with 
-                    constant_current_target_ma = 4.80; //eleco_rma + 0.1;
-                    eleco_dma = constant_current_target_ma;
-                    drive_phase = DrivePhase::Growth;
-                    growth_phase_start = chrono::Utc::now().timestamp();
-                    println!("start growth phase at: {growth_phase_start:?}");
+                    drive_phase = DrivePhase::Probing;
+                    eleco_dma = PROBE_CURRENT_MA;
+                    last_eleco_dma = 0.;
+                    eleco_rma = 0.;
+                    let probe_phase_start = chrono::Utc::now().timestamp();
+                    println!("start probing phase at: {probe_phase_start:?}");
+                }
+                DrivePhase::Probing => {
+                    if eleco_rma >= PROBE_CURRENT_MA  {
+                        // TODO allup11 experiment with target current density 
+                        constant_current_target_ma = current_from_current_density_ma(200., 0.8, 10.);
+                        eleco_dma = constant_current_target_ma;
+                        drive_phase = DrivePhase::Growth;
+                        growth_phase_start = chrono::Utc::now().timestamp();
+                        println!("start growth phase at: {growth_phase_start:?} with eleco_dma: {eleco_dma:.3}");
+                    }
+                    else {
+                        eleco_dma = PROBE_CURRENT_MA;
+                    }
                 }
                 DrivePhase::Anchoring => { // anchoring phase -- constant voltage
                     if prior_elecm_volts > 1.7 {
@@ -231,9 +241,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     else if prior_elecm_volts < 1.55 {
                         eleco_dma += 0.02;
                     }
-                    let current_gap = last_eleco_dma - eleco_rma;
+                    let current_gap: f32 = last_eleco_dma - eleco_rma;
                     if current_gap >= 0.3 {
-                        println!("end anchor phase with eleco dma {last_eleco_dma:?} rma {eleco_rma:?}");
+                        println!("end anchor phase with eleco dma {last_eleco_dma:?} rma {eleco_rma:.3}");
                         // TODO verify: transition to the next phase once we've achieved target voltage
                         constant_current_target_ma = eleco_rma + 0.1;
                         eleco_dma = constant_current_target_ma;
@@ -261,7 +271,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
         }
         else {
-            eleco_dma = 0.;
+            eleco_dma = 0.1;
         }
 
         if abs_diff_ne!(last_eleco_dma, eleco_dma, epsilon = 0.01) {
