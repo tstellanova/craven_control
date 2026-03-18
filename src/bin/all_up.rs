@@ -64,15 +64,6 @@ async fn set_pyro_420ma_drive(ctx: &mut tokio_modbus::client::Context,  milliamp
     set_wa26419_0420_current_loop_drive(ctx, 4, milliamps).await
 }
 
-/**
- * Read the actual current flowing through the pyrometer loop
- */
-async fn read_pyro_420ma_value(ctx: &mut tokio_modbus::client::Context)
--> Result<f32, Box<dyn std::error::Error>> 
-{
-    let val = read_wa8tai_iv(ctx,4).await?;
-    Ok(val)
-}
 
 /**
  * Verify that all the modules we expect to be connected to the RS-485 Modbus are,
@@ -83,23 +74,14 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     // measures dual type K thermocouple signal
     ping_one_modbus_node_id(ctx, NODEID_YKKTC1202_DUAL_TK, REG_NODEID_YKKTC1202_DUAL_TK).await?;
 
-    // // pyro 4-20 mA current loop source (simulates pyrometer)
-    // ping_one_modbus_node_id(ctx,NODEID_N4IOA01_CURR_GEN, REG_NODEID_N4IOA01).await?;
-
-    // // pyro 4-20 mA current loop ammeter (verifies pyrometer simulation signal)
-    // ping_one_modbus_node_id(ctx,NODEID_N4AIA04_IV_ADC, REG_NODEID_N4AIA04).await?;
-
-    // pyro 4-20 mA current loop source (simulates pyrometer)
-    ping_one_modbus_node_id(ctx,NODEID_WA26419_8CH_DAC, REG_NODEID_WAVESHARE_V2).await?;
-
-    // pyro 4-20 mA current loop ammeter (verifies pyrometer simulation signal)
+    // measures voltage and current across the electrodes
     ping_one_modbus_node_id(ctx,NODEID_WA8TAI_IV_ADC, REG_NODEID_WAVESHARE_V2).await?;
 
     // supplies current to the electrode probe
     ping_one_modbus_node_id(ctx,NODEID_YKPVCCS010_CURR_SRC, REG_NODEID_YKPVCCS010_CURR_SRC).await?;
 
-    // measures the voltage at and current flowing through electrode probe
-    // ping_one_modbus_node_id(ctx, NODEID_YKDAQ1402_IV_ADC, REG_NODEID_YKDAQ1402_IV_ADC).await?;
+    // controls furnace on/off
+    ping_one_modbus_node_id(ctx, NODEID_R4DVI04_QRELAY_ADC, REG_NODEID_R4DVI04).await?;
 
     Ok(())
 }
@@ -137,33 +119,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}_recorder.csv",start_time))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,TK1_C,TK2_C,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R,pyro_sim_mA,pyro_actual_mA";
+    const CSV_HEADER: &str =  "epoch_secs,heating,TK1_C,TK2_C,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R";
     writeln!(csv_writer, "{}", CSV_HEADER)?;
     println!("{}",CSV_HEADER);
 
     const MIN_INTER_ELECTRODE_OHMS: f32 = 16. * 1.5;
     const INF_INTER_ELECTRODE_OHMS: f32 = 60E3;
-    const MIN_PYRO_MA:f32 = 4.;
-    const MAX_PYRO_MA:f32 = 20.;
-    const MIN_PYRO_TEMP_C:f32 = 0.;
-    const MAX_PYRO_TEMP_C:f32 = 1000.;
-    const PYRO_CELSIUS_RANGE:f32 = MAX_PYRO_TEMP_C - MIN_PYRO_TEMP_C;
-    const MILLIAMPS_PER_CELSIUS:f32 = (MAX_PYRO_MA - MIN_PYRO_MA)/PYRO_CELSIUS_RANGE; 
-    const PYRO_SIM_MA_CORRECTION: f32 = -0.375; // required to correct current loop value seen by induction heater
+
+    const MAX_PROBE_TEMP_C:f32 = 1000.;
+
     const NOMINAL_GROWTH_MA: f32 = 5.;
     const PROBE_CURRENT_MA: f32 = 1.;
-    let mut cur_core_temperature: f64 = 20.;
-    let mut pyro_sim_ma = MIN_PYRO_MA;
-    let mut pyro_actual_ma = 0.;
-    let mut last_pyro_sim_ma = 3.;
+
+    let mut heater_on: bool = false;
     let mut eleco_dma = 0.; // electrode drive current (a value we set)
     let mut last_eleco_dma = 0.; // prior loop electrode drive current
     let mut eleco_rma = 0.; // electrode reported drive current (current driver provides this)
     let mut prior_elecm_volts = 0.; //prior measured volts across electrodes
     let mut prior_elecm_ma = 0.;
     let mut drive_phase = DrivePhase::Init;
-    let mut anchoring_phase_start = 0;
-    let mut growth_phase_start = 0;
+
     let mut constant_current_target_ma = 0.;
     let mut prior_inter_electrode_resistance = INF_INTER_ELECTRODE_OHMS;
     // Create an AtomicBool flag protected by Arc for thread-safe sharing
@@ -193,23 +168,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 else { tk1_c.into()}
             }
             else if ch2_tk_opt.is_some() { tk2_c.into() }
-            else { MAX_PYRO_TEMP_C as f32};
+            else { MAX_PROBE_TEMP_C as f32};
         // println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
 
-        pyro_sim_ma = MIN_PYRO_MA + MILLIAMPS_PER_CELSIUS * avg_core_tk_c  + PYRO_SIM_MA_CORRECTION; //TODO recalibrate instead??
-        if pyro_sim_ma < 4.0 { pyro_sim_ma = 4.0 };
-        // Setting a new current value may cause a short dropout in current:
-        // we don't set a new current value unless it's significantly different than previous
-        if abs_diff_ne!(last_pyro_sim_ma, pyro_sim_ma, epsilon = 0.01) {
-            sleep(Duration::from_millis(125)).await;
-            set_pyro_420ma_drive(&mut ctx, pyro_sim_ma).await?;
-            last_pyro_sim_ma = pyro_sim_ma;
-        }
-        sleep(Duration::from_millis(125)).await;
-        pyro_actual_ma = read_pyro_420ma_value(&mut ctx).await?;
+        todo!("toggle furnace heater on/off and set heater_on");
+        heater_on = false;
 
-        // recalculate ideal electrode drive current:
-        // calculate current density for about 10 mm long, 0.7 mm average OD wires
         if prior_inter_electrode_resistance < 8000. ||
             (avg_core_tk_c > 740. && avg_core_tk_c < 790.) {
 
@@ -224,12 +188,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 DrivePhase::Probing => {
                     if eleco_rma >= PROBE_CURRENT_MA  {
-                        // TODO allup11 experiment with target current density 
+                        // TODO experiment with target current density 
                         // constant_current_target_ma = current_from_current_density_ma(200., 0.8, 10.);
                         constant_current_target_ma = 19.; //TODO tmp
                         eleco_dma = constant_current_target_ma;
                         drive_phase = DrivePhase::Growth;
-                        growth_phase_start = chrono::Utc::now().timestamp();
+                        let growth_phase_start = chrono::Utc::now().timestamp();
                         println!("start growth phase at: {growth_phase_start:?} with eleco_dma: {eleco_dma:.3}");
                     }
                     else {
@@ -246,11 +210,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let current_gap: f32 = last_eleco_dma - eleco_rma;
                     if current_gap >= 0.3 {
                         println!("end anchor phase with eleco dma {last_eleco_dma:?} rma {eleco_rma:.3}");
-                        // TODO verify: transition to the next phase once we've achieved target voltage
+                        // transition to the next phase once we've achieved target voltage
                         constant_current_target_ma = eleco_rma + 0.1;
                         eleco_dma = constant_current_target_ma;
                         drive_phase = DrivePhase::Growth;
-                        growth_phase_start = chrono::Utc::now().timestamp();
+                        let growth_phase_start = chrono::Utc::now().timestamp();
                         println!("start growth phase at: {growth_phase_start:?}");
                     }
                 }
@@ -302,12 +266,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
         let timestamp = chrono::Utc::now().timestamp();
-        let log_line = format!( "{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.1},{:.1},{:.1}",
+        let log_line = format!( "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.1}",
             timestamp,
+            heater_on as u8,
             tk1_c, tk2_c, avg_core_tk_c,
             eleco_dma, eleco_rma, elecm_ma,
             elecm_volts, inter_electrode_resistance,
-            pyro_sim_ma as f32, pyro_actual_ma as f32
             );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
@@ -316,7 +280,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Shutting down outputs...");
     sleep(Duration::from_millis(125)).await;
-    set_pyro_420ma_drive(&mut ctx, 0.).await?;
+    // TODO ensure furnace is disabled
+
     sleep(Duration::from_millis(125)).await;
     set_electrode_current_drive(&mut ctx,0.).await?;
 
