@@ -117,19 +117,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4IOA01, NODEID_DEFAULT, NODEID_N4IOA01_CURR_GEN).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA8TAI_IV_ADC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA26419_8CH_DAC).await?;
+    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_R4DVI04, NODEID_DEFAULT, NODEID_R4DVI04_QRELAY_ADC).await?;
 
-    let builder = tokio_serial::new(tty_path, baud_rate);
-    let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
+    //
+
+    // let builder = tokio_serial::new(tty_path, baud_rate);
+    // let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
 
     // cofigure channel 1-8 input modes for WA8TAI_IV_AD: Even channels are current, odd channels are voltage
-    configure_wa8tai_mixed_adc_modes(&mut ctx).await?;
+    // configure_wa8tai_mixed_adc_modes(&mut ctx).await?;
 
     // let ma = read_wa8tai_iv(&mut ctx, 2).await?;
     // println!("test milliamp value: {ma:?}");
 
     // configure_wa26419(&mut ctx).await?;
 
-    ctx.disconnect().await?;
+    // ctx.disconnect().await?;
 
     Ok(())
 }

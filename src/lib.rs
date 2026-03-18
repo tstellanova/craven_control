@@ -30,6 +30,7 @@ pub const NODEID_YKPVCCS010_CURR_SRC: u8 = 0x2F;
 pub const NODEID_YKKTC1202_DUAL_TK: u8 = 0x3F;
 pub const NODEID_N4IOA01_CURR_GEN: u8 = 0x4A; // 4-20 mA current loop source (signal generator)
 pub const NODEID_WA26419_8CH_DAC: u8 = 0x4F; // TODO Waveshare 8CH analog output (0-20 mA)
+pub const NODEID_R4DVI04_QRELAY_ADC: u8 = 0x5A; // Eletechsup quad relay plus ADC
 pub const NODEID_QUAD_RELAY: u8 = 0x5F; // TODO not yet programmed into relay board
 pub const NODEID_MAX: u8 = 0x7F;
 
@@ -50,7 +51,7 @@ pub const REG_N4IOA01_CURR_VAL: u16 = 0x00;
 pub const REG_YKKTC1202_TEMP_VALS: u16 = 0x00; // The dual RTK's temperature values
 pub const REG_YKKTC1202_VALIDITY: u16 = 0x10; // The dual RTK's thermocouple connection state
 pub const REG_N4AIA04_CH1_CURR: u16 = 0x0002;
-
+pub const REG_NODEID_R4DVI04: u16 = 0x00FD;
 
 // /// Combine two u16 registers into amn f32
 // fn registers_to_f32(registers: &[u16], offset: usize) -> f32 {
@@ -285,4 +286,14 @@ pub async fn read_ykktc1202_dual_tk_temps(ctx: &mut tokio_modbus::client::Contex
     let ch1_tk_opt = if ch1_tk_conn { Some(ch1_tk_val) } else { None };
     let ch2_tk_opt = if ch2_tk_conn { Some(ch2_tk_val) } else { None };
     Ok((ch1_tk_opt, ch2_tk_opt))
+}
+
+
+pub async fn toggle_r4dvi04_relay(ctx: &mut tokio_modbus::client::Context, channel: u8, active: bool)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    let relay_coil_address: u16 = (channel -1) as u16;
+    ctx.set_slave(Slave(NODEID_R4DVI04_QRELAY_ADC));
+    ctx.write_single_coil(relay_coil_address, active).await??;
+    Ok(())
 }
