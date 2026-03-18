@@ -54,18 +54,6 @@ async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, mi
 
 
 /**
- * Set the pyro simulator current loop controller (4-20 mA source) current value
- */
-async fn set_pyro_420ma_drive(ctx: &mut tokio_modbus::client::Context,  milliamps: f32) 
--> Result<(), Box<dyn std::error::Error>> 
-{
-    // println!("set pyro sim mA: {milliamps:?}");
-    // set_n4ioa01_0420_current_loop_drive(ctx, milliamps).await
-    set_wa26419_0420_current_loop_drive(ctx, 4, milliamps).await
-}
-
-
-/**
  * Verify that all the modules we expect to be connected to the RS-485 Modbus are,
  * in fact, connected.
  */
