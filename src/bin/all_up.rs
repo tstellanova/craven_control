@@ -17,6 +17,10 @@ use std::sync::mpsc::channel;
 use approx::{AbsDiff, abs_diff_ne};
 use craven_control::*;
 
+
+const MAX_PROBE_TEMP_C:f32 = 1000.;
+
+
 /**
  * Read the dual thermocouple reader
  */
@@ -92,6 +96,69 @@ enum DrivePhase {
     Done = 4,
 } 
 
+#[derive(Debug, Clone)]
+pub struct FurnaceState {
+    /// Prior maximum temperature
+    pub prior_max_temp_c: f32,
+
+    /// Temperature set point
+    pub setupoint_c: f32,
+
+    /// Most recently measured temperature
+    pub measured_temp_c: f32,
+
+    pub heater_on: bool,
+
+}
+
+async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    toggle_r4dvi04_relay(ctx,4, active).await
+}
+
+async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut FurnaceState) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    // first, measure current temperatur
+    sleep(Duration::from_millis(125));
+    let (ch1_tk_opt, ch2_tk_opt) = read_dual_tk_temps(ctx).await?;
+    let tk1_c = ch1_tk_opt.unwrap_or(0f32);
+    let tk2_c = ch2_tk_opt.unwrap_or(0f32);
+    let mut avg_core_tk_c: f32 = 
+        if ch1_tk_opt.is_some() {
+            if ch2_tk_opt.is_some() {  (tk1_c + tk2_c) / 2f32 }
+            else { tk1_c.into()}
+        }
+        else if ch2_tk_opt.is_some() { tk2_c.into() }
+        else { MAX_PROBE_TEMP_C as f32};
+    
+    if abs_diff_ne!(tk1_c, tk2_c, epsilon=10.) {
+        println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
+    }
+
+    state.measured_temp_c = avg_core_tk_c;
+
+    // TODO proper bangbang controller
+    if state.measured_temp_c < ( state.setupoint_c  - 20.) {
+        println!("set heater on at: {:.3} < {:.3}", state.measured_temp_c, state.setupoint_c);
+        toggle_furnace(ctx, true).await?;
+        state.heater_on = true;
+        state.prior_max_temp_c = 0.; //reset
+    }
+    else if state.measured_temp_c > state.setupoint_c {
+        println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, state.setupoint_c);
+        toggle_furnace(ctx, false).await?;
+        state.heater_on = false;
+    }
+
+    if state.measured_temp_c > state.prior_max_temp_c {
+        state.prior_max_temp_c = state.measured_temp_c;
+    }
+    
+    Ok(())
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to Modbus apparatus via TCP server bridge (a WiFi bridge on our local network)
@@ -107,19 +174,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}_recorder.csv",start_time))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,heating,TK1_C,TK2_C,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R";
+    const CSV_HEADER: &str =  "epoch_secs,heating,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R";
     writeln!(csv_writer, "{}", CSV_HEADER)?;
     println!("{}",CSV_HEADER);
 
     const MIN_INTER_ELECTRODE_OHMS: f32 = 16. * 1.5;
     const INF_INTER_ELECTRODE_OHMS: f32 = 60E3;
 
-    const MAX_PROBE_TEMP_C:f32 = 1000.;
-
     const NOMINAL_GROWTH_MA: f32 = 5.;
     const PROBE_CURRENT_MA: f32 = 1.;
 
-    let mut heater_on: bool = false;
     let mut eleco_dma = 0.; // electrode drive current (a value we set)
     let mut last_eleco_dma = 0.; // prior loop electrode drive current
     let mut eleco_rma = 0.; // electrode reported drive current (current driver provides this)
@@ -144,26 +208,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let ideal_current = current_from_current_density_ma(IDEAL_CURRENT_DENSITY_MA_CM2, 0.8, 10.);
     // println!("IDEAL_CURRENT: {ideal_current:?} mA");
 
+    let mut furnace_state = FurnaceState  { 
+        prior_max_temp_c: 0., 
+        setupoint_c: 750., 
+        measured_temp_c: 0., 
+        heater_on: false 
+    };
+
     while running.load(Ordering::SeqCst) { 
 
-        sleep(Duration::from_millis(125));
-        let (ch1_tk_opt, ch2_tk_opt) = read_dual_tk_temps(&mut ctx).await?;
-        let tk1_c = ch1_tk_opt.unwrap_or(0f32);
-        let tk2_c = ch2_tk_opt.unwrap_or(0f32);
-        let mut avg_core_tk_c: f32 = 
-            if ch1_tk_opt.is_some() {
-                if ch2_tk_opt.is_some() {  (tk1_c + tk2_c) / 2f32 }
-                else { tk1_c.into()}
-            }
-            else if ch2_tk_opt.is_some() { tk2_c.into() }
-            else { MAX_PROBE_TEMP_C as f32};
-        // println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
+        control_furnace(&mut ctx, &mut furnace_state).await?;
 
-        todo!("toggle furnace heater on/off and set heater_on");
-        heater_on = false;
-
-        if prior_inter_electrode_resistance < 8000. ||
-            (avg_core_tk_c > 740. && avg_core_tk_c < 790.) {
+        if prior_inter_electrode_resistance < 8000. {
 
             match drive_phase {
                 DrivePhase::Init => {
@@ -246,18 +302,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 elecm_volts / (estd_electrode_ma/1000.) 
             }
             else {
-                INF_INTER_ELECTRODE_OHMS // arbitrary value based on measurement
+                INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
             };
         prior_inter_electrode_resistance = inter_electrode_resistance;
         prior_elecm_volts = elecm_volts;
         prior_elecm_ma = elecm_ma;
 
-
         let timestamp = chrono::Utc::now().timestamp();
-        let log_line = format!( "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.1}",
+        let log_line = format!( "{},{},{:.2},{:.3},{:.3},{:.3},{:.3},{:.1}",
             timestamp,
-            heater_on as u8,
-            tk1_c, tk2_c, avg_core_tk_c,
+            furnace_state.heater_on as u8,
+            furnace_state.measured_temp_c,
             eleco_dma, eleco_rma, elecm_ma,
             elecm_volts, inter_electrode_resistance,
             );
@@ -267,8 +322,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("Shutting down outputs...");
-    sleep(Duration::from_millis(125)).await;
-    // TODO ensure furnace is disabled
+    toggle_furnace(&mut ctx, false);
 
     sleep(Duration::from_millis(125)).await;
     set_electrode_current_drive(&mut ctx,0.).await?;
