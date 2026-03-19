@@ -214,7 +214,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut furnace_state = FurnaceState  { 
         prior_max_temp_c: 0., 
-        setupoint_c: 750., 
+        setupoint_c: 770., 
         measured_temp_c: 0., 
         heater_on: false 
     };
