@@ -102,7 +102,7 @@ pub struct FurnaceState {
     pub prior_max_temp_c: f32,
 
     /// Temperature set point
-    pub setupoint_c: f32,
+    pub setpoint_c: f32,
 
     /// Most recently measured temperature
     pub measured_temp_c: f32,
@@ -140,17 +140,17 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
     state.measured_temp_c = avg_core_tk_c;
 
     // TODO proper bangbang controller
-    if state.measured_temp_c < ( state.setupoint_c  - 20.) {
+    if state.measured_temp_c < ( state.setpoint_c  - 10.) {
         if !state.heater_on {
-            println!("set heater on at: {:.3} < {:.3}", state.measured_temp_c, state.setupoint_c);
+            println!("set heater on at: {:.3} < {:.3}", state.measured_temp_c, state.setpoint_c);
             toggle_furnace(ctx, true).await?;
             state.heater_on = true;
             state.prior_max_temp_c = 0.; //reset
         }
     }
-    else if state.measured_temp_c > state.setupoint_c {
+    else if state.measured_temp_c > (state.setpoint_c + 10.) {
         if state.heater_on {
-            println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, state.setupoint_c);
+            println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, state.setpoint_c);
             toggle_furnace(ctx, false).await?;
             state.heater_on = false;
         }
@@ -214,7 +214,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut furnace_state = FurnaceState  { 
         prior_max_temp_c: 0., 
-        setupoint_c: 770., 
+        setpoint_c: 770., 
         measured_temp_c: 0., 
         heater_on: false 
     };
