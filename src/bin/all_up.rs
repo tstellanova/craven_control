@@ -141,15 +141,19 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
 
     // TODO proper bangbang controller
     if state.measured_temp_c < ( state.setupoint_c  - 20.) {
-        println!("set heater on at: {:.3} < {:.3}", state.measured_temp_c, state.setupoint_c);
-        toggle_furnace(ctx, true).await?;
-        state.heater_on = true;
-        state.prior_max_temp_c = 0.; //reset
+        if !state.heater_on {
+            println!("set heater on at: {:.3} < {:.3}", state.measured_temp_c, state.setupoint_c);
+            toggle_furnace(ctx, true).await?;
+            state.heater_on = true;
+            state.prior_max_temp_c = 0.; //reset
+        }
     }
     else if state.measured_temp_c > state.setupoint_c {
-        println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, state.setupoint_c);
-        toggle_furnace(ctx, false).await?;
-        state.heater_on = false;
+        if state.heater_on {
+            println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, state.setupoint_c);
+            toggle_furnace(ctx, false).await?;
+            state.heater_on = false;
+        }
     }
 
     if state.measured_temp_c > state.prior_max_temp_c {
