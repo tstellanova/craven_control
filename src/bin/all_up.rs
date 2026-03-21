@@ -61,6 +61,7 @@ async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
  */
 async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<f32, Box<dyn std::error::Error>> 
 {
+    sleep(Duration::from_millis(125)).await;
     println!("new eleco_ma: {milliamps:.3}");
     set_ykpvccs0100_current_drive(ctx, milliamps).await
 }
@@ -105,6 +106,29 @@ enum DrivePhase {
     Cooldown = 4,
 } 
 
+/**
+ * Redirect furnace on/off to actual modbus device.
+ */
+async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    sleep(Duration::from_millis(200)).await;
+    toggle_r4dvi04_relay(ctx,4, active).await?;
+    // sleep(Duration::from_millis(150)).await;
+    Ok(())
+}
+
+
+async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    println!("Shutting down outputs...");
+    toggle_furnace(ctx, false).await?;
+    set_electrode_current_drive(ctx,0.).await?;
+    println!("Outputs disabled.");
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct FurnaceState {
     /// Prior maximum temperature
@@ -120,22 +144,16 @@ pub struct FurnaceState {
 
 }
 
-
-
-async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
--> Result<(), Box<dyn std::error::Error>> 
-{
-    toggle_r4dvi04_relay(ctx,4, active).await
-}
-
 /**
  * Turn the furnace heating on/off based on setpoint and temperature
  */
 async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut FurnaceState) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
+    let mut new_temp_setpoint_c: f32 = 0.;
+
     // first, measure temperature
-    sleep(Duration::from_millis(100));
+    sleep(Duration::from_millis(125));
     let (ch1_tk_opt, ch2_tk_opt) = read_dual_tk_temps(ctx).await?;
     let tk1_c = ch1_tk_opt.unwrap_or(0f32);
     let tk2_c = ch2_tk_opt.unwrap_or(0f32);
@@ -156,32 +174,41 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
     // update the temperature setpoint based on which phase of electrolyte melting we're at
     if state.measured_temp_c < ELECTROLYTE_TARGET_TEMP_C {
         if state.measured_temp_c < PROBE_CHECK_TEMP_C {
-            state.setpoint_c = PROBE_CHECK_TEMP_C;
+            new_temp_setpoint_c = PROBE_CHECK_TEMP_C;
         }
         else if state.measured_temp_c < PROBE_INSERTED_TEMP_C {
-            state.setpoint_c = PROBE_INSERTED_TEMP_C;
+            new_temp_setpoint_c = PROBE_INSERTED_TEMP_C;
         }
         else {
-            state.setpoint_c = ELECTROLYTE_TARGET_TEMP_C;
+            new_temp_setpoint_c = ELECTROLYTE_TARGET_TEMP_C;
         }
+    }
+    else {
+        new_temp_setpoint_c = ELECTROLYTE_TARGET_TEMP_C;
+    }
+
+    if new_temp_setpoint_c != state.setpoint_c {
+        println!("setpoint old {:.3} new {:.3}", state.setpoint_c, new_temp_setpoint_c);
     }
 
     // TODO proper bangbang controller?
-    if state.measured_temp_c < ( state.setpoint_c  - 5.) {
+    if state.measured_temp_c < (new_temp_setpoint_c  - 5.) {
         if !state.heater_on {
-            println!("set heater on at: {:.3} < {:.3}", state.measured_temp_c, state.setpoint_c);
+            println!("set heater on at: {:.3} < {:.3}", state.measured_temp_c, new_temp_setpoint_c);
             toggle_furnace(ctx, true).await?;
             state.heater_on = true;
             state.prior_max_temp_c = 0.; //reset
         }
     }
-    else if state.measured_temp_c > (state.setpoint_c + 10.) {
+    else if state.measured_temp_c > (new_temp_setpoint_c + 10.) {
         if state.heater_on {
-            println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, state.setpoint_c);
+            println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, new_temp_setpoint_c);
             toggle_furnace(ctx, false).await?;
             state.heater_on = false;
         }
     }
+
+    state.setpoint_c = new_temp_setpoint_c;
 
     if state.measured_temp_c > state.prior_max_temp_c {
         state.prior_max_temp_c = state.measured_temp_c;
@@ -210,11 +237,10 @@ pub struct ElectrodeState {
  */
 async fn control_electrodes(ctx: &mut tokio_modbus::client::Context, 
     state: &mut ElectrodeState,
-    furnace_state: &FurnaceState,
 ) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    let mut new_drive_ma: f32 = 0.;
+    let mut new_drive_ma: f32 = state.target_drive_ma;
     
     let current_gap: f32 = 
         if state.target_drive_ma >= PROBE_CURRENT_MA {
@@ -232,7 +258,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Anchoring => { 
-            if current_gap > 1.0 {
+            if current_gap > 2.0 {
                 // the actual current has diverged from desired current
                 println!("end anchor phase with target {:.3} mA :: actual {:.3} mA", 
                     state.target_drive_ma, state.measured_ma);
@@ -242,13 +268,13 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
             else {
                 // slowly increase the desired drive current until measured current diverges
-                new_drive_ma = state.target_drive_ma + 0.05;
+                new_drive_ma = state.target_drive_ma + 0.1;
             }
         }
         DrivePhase::Growth => {  
             if current_gap > 0.5 {
                 // try nudging down the drive current a bit
-                new_drive_ma = state.target_drive_ma - 0.005;
+                new_drive_ma = state.reported_drive_ma;
             }
             // Terminate the current drive if we determine that resistance is close to zero (indicating
             // that the electrode-electrode gap has been bridged by conductive material).
@@ -266,9 +292,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     };
 
     if abs_diff_ne!(new_drive_ma, state.target_drive_ma, epsilon = 0.001) {
-        sleep(Duration::from_millis(125)).await;
         state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
-        state.target_drive_ma = new_drive_ma;
     }
 
     sleep(Duration::from_millis(125)).await;
@@ -288,6 +312,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     state.estimated_resistance_ohms = inter_electrode_resistance;
     state.measured_volts = elecm_volts;
     state.measured_ma = elecm_ma;
+    state.target_drive_ma = new_drive_ma;
+
 
     Ok(())
 }
@@ -300,6 +326,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Connecting to: '{socket_addr:?}'");
     let mut ctx: client::Context = tcp::connect(socket_addr).await?;
     enumerate_required_modules(&mut ctx).await?;
+
+    zero_control_outputs(&mut ctx).await?;
 
     let start_time = chrono::Utc::now().timestamp();
     let log_out_filename = format!("{}_recorder.csv",start_time);
@@ -339,7 +367,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while running.load(Ordering::SeqCst) { 
         control_furnace(&mut ctx, &mut furnace_state).await?;
-        control_electrodes(&mut ctx, &mut electrode_state, &furnace_state).await?;
+        control_electrodes(&mut ctx, &mut electrode_state).await?;
 
         let timestamp = chrono::Utc::now().timestamp();
         let log_line = format!( "{},{},{:.2},{:.3},{:.3},{:.3},{:.3},{:.1}",
@@ -354,13 +382,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         csv_writer.flush()?;
     }
 
-    println!("Shutting down outputs...");
-    sleep(Duration::from_millis(125)).await;
-    toggle_furnace(&mut ctx, false);
-
-    sleep(Duration::from_millis(125)).await;
-    set_electrode_current_drive(&mut ctx,0.).await?;
-
+    zero_control_outputs(&mut ctx).await?;
     ctx.disconnect().await?;
 
     Ok(())
