@@ -19,7 +19,16 @@ use craven_control::*;
 
 
 const MAX_PROBE_TEMP_C:f32 = 1000.;
+const PROBE_CHECK_TEMP_C:f32 = 550.; /// Temp at which we attempt to submerge thermo probes in electrolyte melt
+const PROBE_INSERTED_TEMP_C:f32 = 600.;/// Temp we expect to see when probe is succesfully inserted into melt
+const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 
+const MIN_INTER_ELECTRODE_OHMS: f32 = 16. * 1.5;
+const INF_INTER_ELECTRODE_OHMS: f32 = 60E3;
+
+const NOMINAL_GROWTH_MA: f32 = 5.;
+const PROBE_CURRENT_MA: f32 = 1.;
+const COOLDOWN_PROBE_CURRENT_MA: f32 = 0.5;
 
 /**
  * Read the dual thermocouple reader
@@ -88,12 +97,12 @@ fn current_from_current_density_ma(density_ma_cm2: f64, wire_od_mm: f64, wire_le
     (density_ma_cm2  * electrode_surface_area) as f32
 }
 
+#[derive(Debug, Clone)]
 enum DrivePhase {
-    Init = 0,
-    Probing = 1, // check that the electrode is immersed in conductive melt
-    Anchoring = 2, /// Attach initial carbon atoms to cathode surface
-    Growth = 3, /// Growth of carbon chains between electrodes
-    Done = 4,
+    Warmup = 0, // check that the electrode is immersed in conductive melt
+    Anchoring = 1, /// Attach initial carbon atoms to cathode surface
+    Growth = 2, /// Growth of carbon chains between electrodes
+    Cooldown = 4,
 } 
 
 #[derive(Debug, Clone)]
@@ -111,12 +120,17 @@ pub struct FurnaceState {
 
 }
 
+
+
 async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
 -> Result<(), Box<dyn std::error::Error>> 
 {
     toggle_r4dvi04_relay(ctx,4, active).await
 }
 
+/**
+ * Turn the furnace heating on/off based on setpoint and temperature
+ */
 async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut FurnaceState) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
@@ -139,7 +153,20 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
 
     state.measured_temp_c = avg_core_tk_c;
 
-    // TODO proper bangbang controller
+    // update the temperature setpoint based on which phase of electrolyte melting we're at
+    if state.measured_temp_c < ELECTROLYTE_TARGET_TEMP_C {
+        if state.measured_temp_c < PROBE_CHECK_TEMP_C {
+            state.setpoint_c = PROBE_CHECK_TEMP_C;
+        }
+        else if state.measured_temp_c < PROBE_INSERTED_TEMP_C {
+            state.setpoint_c = PROBE_INSERTED_TEMP_C;
+        }
+        else {
+            state.setpoint_c = ELECTROLYTE_TARGET_TEMP_C;
+        }
+    }
+
+    // TODO proper bangbang controller?
     if state.measured_temp_c < ( state.setpoint_c  - 5.) {
         if !state.heater_on {
             println!("set heater on at: {:.3} < {:.3}", state.measured_temp_c, state.setpoint_c);
@@ -163,6 +190,108 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
     Ok(())
 }
 
+// 200 mA / cm^2 is ideal according to Y. Chen et al
+// const IDEAL_CURRENT_DENSITY_MA_CM2: f64 = 200.;
+// let ideal_current = current_from_current_density_ma(IDEAL_CURRENT_DENSITY_MA_CM2, 0.8, 10.);
+// println!("IDEAL_CURRENT: {ideal_current:?} mA");
+
+#[derive(Debug, Clone)]
+pub struct ElectrodeState {
+    drive_phase: DrivePhase,
+    estimated_resistance_ohms: f32,
+    target_drive_ma: f32,
+    reported_drive_ma: f32,
+    measured_ma: f32,
+    measured_volts: f32,
+}
+
+/**
+ * Adjust the electrode current based on melt condition and drive phase
+ */
+async fn control_electrodes(ctx: &mut tokio_modbus::client::Context, 
+    state: &mut ElectrodeState,
+    furnace_state: &FurnaceState,
+) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    let mut new_drive_ma: f32 = 0.;
+    
+    let current_gap: f32 = 
+        if state.target_drive_ma >= PROBE_CURRENT_MA {
+            state.target_drive_ma - state.measured_ma
+        }
+        else { 100. }; // outrageously large current gap
+
+    match state.drive_phase {
+        DrivePhase::Warmup => {
+            new_drive_ma = PROBE_CURRENT_MA;
+            if current_gap < 0.2 {
+                // the measured current is about the same as probe current
+                state.drive_phase = DrivePhase::Anchoring;
+                println!("start anchor phase at: {:?}",chrono::Utc::now().timestamp());
+            }
+        }
+        DrivePhase::Anchoring => { 
+            if current_gap > 1.0 {
+                // the actual current has diverged from desired current
+                println!("end anchor phase with target {:.3} mA :: actual {:.3} mA", 
+                    state.target_drive_ma, state.measured_ma);
+                // transition to the next phase now that current has slightly diverged
+                state.drive_phase = DrivePhase::Growth;
+                println!("start growth phase at: {:?}",chrono::Utc::now().timestamp());
+            }
+            else {
+                // slowly increase the desired drive current until measured current diverges
+                new_drive_ma = state.target_drive_ma + 0.05;
+            }
+        }
+        DrivePhase::Growth => {  
+            if current_gap > 0.5 {
+                // try nudging down the drive current a bit
+                new_drive_ma = state.target_drive_ma - 0.005;
+            }
+            // Terminate the current drive if we determine that resistance is close to zero (indicating
+            // that the electrode-electrode gap has been bridged by conductive material).
+            if state.estimated_resistance_ohms < MIN_INTER_ELECTRODE_OHMS  {
+                println!("end growth phase with V {:?} R {:?}", state.measured_volts, state.estimated_resistance_ohms);
+                state.drive_phase = DrivePhase::Cooldown;
+                println!("end growth phase at: {:?}",chrono::Utc::now().timestamp());
+            }
+        }
+        DrivePhase::Cooldown => {
+            new_drive_ma = COOLDOWN_PROBE_CURRENT_MA;
+        }
+        _ => {
+        }
+    };
+
+    if abs_diff_ne!(new_drive_ma, state.target_drive_ma, epsilon = 0.001) {
+        sleep(Duration::from_millis(125)).await;
+        state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
+        state.target_drive_ma = new_drive_ma;
+    }
+
+    sleep(Duration::from_millis(125)).await;
+    let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
+    let esimated_electrode_ma: f32 = 
+        if state.target_drive_ma > 0. {
+            if elecm_ma > 0. { elecm_ma } else { state.reported_drive_ma}
+        }  else { 0. };
+    let inter_electrode_resistance = 
+        if esimated_electrode_ma > 0. {
+            // this also covers the case where volts = 0.0, i.e. zero resistance.
+            (1000. * elecm_volts) / esimated_electrode_ma 
+        }
+        else {
+            INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
+        };
+    state.estimated_resistance_ohms = inter_electrode_resistance;
+    state.measured_volts = elecm_volts;
+    state.measured_ma = elecm_ma;
+
+    Ok(())
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to Modbus apparatus via TCP server bridge (a WiFi bridge on our local network)
@@ -173,160 +302,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     enumerate_required_modules(&mut ctx).await?;
 
     let start_time = chrono::Utc::now().timestamp();
-    let log_out_path = format!("{}_recorder.csv",start_time);
-    println!("Recording data to {log_out_path:?} ...");
-    let logfile = File::create(format!("./data/{}_recorder.csv",start_time))?;
+    let log_out_filename = format!("{}_recorder.csv",start_time);
+    println!("Recording data to {log_out_filename:?} ...");
+    let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,heating,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R";
-    writeln!(csv_writer, "{}", CSV_HEADER)?;
+    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R";
     println!("{}",CSV_HEADER);
+    writeln!(csv_writer, "{}", CSV_HEADER)?;
 
-    const MIN_INTER_ELECTRODE_OHMS: f32 = 16. * 1.5;
-    const INF_INTER_ELECTRODE_OHMS: f32 = 60E3;
-
-    const NOMINAL_GROWTH_MA: f32 = 5.;
-    const PROBE_CURRENT_MA: f32 = 1.;
-
-    let mut eleco_dma = 0.; // electrode drive current (a value we set)
-    let mut last_eleco_dma = 0.; // prior loop electrode drive current
-    let mut eleco_rma = 0.; // electrode reported drive current (current driver provides this)
-    let mut prior_elecm_volts = 0.; //prior measured volts across electrodes
-    let mut prior_elecm_ma = 0.;
-    let mut drive_phase = DrivePhase::Init;
-
-    let mut constant_current_target_ma = 0.;
-    let mut prior_inter_electrode_resistance = INF_INTER_ELECTRODE_OHMS;
     // Create an AtomicBool flag protected by Arc for thread-safe sharing
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
     // Set the Ctrl+C handler
     ctrlc::set_handler(move || {
-        println!("\nReceived Ctrl+C, initiating shutdown...");
+        println!("\n====> Received Ctrl+C, initiating shutdown...");
         r.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
 
-    // 200 mA / cm^2 is ideal according to Y. Chen et al
-    // const IDEAL_CURRENT_DENSITY_MA_CM2: f64 = 200.;
-    // let ideal_current = current_from_current_density_ma(IDEAL_CURRENT_DENSITY_MA_CM2, 0.8, 10.);
-    // println!("IDEAL_CURRENT: {ideal_current:?} mA");
-
     let mut furnace_state = FurnaceState  { 
         prior_max_temp_c: 0., 
-        setpoint_c: 770., 
+        setpoint_c: PROBE_CHECK_TEMP_C, /// Heat until we can attempt probe insertion into melt
         measured_temp_c: 0., 
         heater_on: false 
     };
 
+    let mut electrode_state = ElectrodeState { 
+        drive_phase: DrivePhase::Warmup, 
+        estimated_resistance_ohms: INF_INTER_ELECTRODE_OHMS, 
+        target_drive_ma: 0., 
+        reported_drive_ma: 0., 
+        measured_ma: 0.,
+        measured_volts: 0. 
+    };
+
     while running.load(Ordering::SeqCst) { 
-
         control_furnace(&mut ctx, &mut furnace_state).await?;
-
-        if prior_inter_electrode_resistance < 8000. 
-            || furnace_state.measured_temp_c > furnace_state.setpoint_c {
-
-            match drive_phase {
-                DrivePhase::Init => {
-                    drive_phase = DrivePhase::Probing;
-                    eleco_dma = PROBE_CURRENT_MA;
-                    last_eleco_dma = 0.;
-                    eleco_rma = 0.;
-                    let probe_phase_start = chrono::Utc::now().timestamp();
-                    println!("start probing phase at: {probe_phase_start:?}");
-                }
-                DrivePhase::Probing => {
-                    if eleco_rma >= PROBE_CURRENT_MA  {
-                        // TODO experiment with target current density 
-                        // constant_current_target_ma = current_from_current_density_ma(200., 0.8, 10.);
-                        constant_current_target_ma = 19.; //TODO tmp
-                        eleco_dma = constant_current_target_ma;
-                        drive_phase = DrivePhase::Growth;
-                        let growth_phase_start = chrono::Utc::now().timestamp();
-                        println!("start growth phase at: {growth_phase_start:?} with eleco_dma: {eleco_dma:.3}");
-                    }
-                    else {
-                        eleco_dma = PROBE_CURRENT_MA;
-                    }
-                }
-                DrivePhase::Anchoring => { // anchoring phase -- constant voltage
-                    if prior_elecm_volts > 1.7 {
-                        eleco_dma -= 0.02;
-                    }
-                    else if prior_elecm_volts < 1.55 {
-                        eleco_dma += 0.02;
-                    }
-                    let current_gap: f32 = last_eleco_dma - eleco_rma;
-                    if current_gap >= 0.3 {
-                        println!("end anchor phase with eleco dma {last_eleco_dma:?} rma {eleco_rma:.3}");
-                        // transition to the next phase once we've achieved target voltage
-                        constant_current_target_ma = eleco_rma + 0.1;
-                        eleco_dma = constant_current_target_ma;
-                        drive_phase = DrivePhase::Growth;
-                        let growth_phase_start = chrono::Utc::now().timestamp();
-                        println!("start growth phase at: {growth_phase_start:?}");
-                    }
-                }
-                DrivePhase::Growth => {  // whisker growth phase: constant current
-                    eleco_dma = constant_current_target_ma;
-
-                    // Terminate the current drive if we determine that resistance is close to zero (indicating
-                    // that the electrode-electrode gap has been bridged by conductive material).
-                    if prior_inter_electrode_resistance < MIN_INTER_ELECTRODE_OHMS  {
-                        println!("end growth phase with V {prior_elecm_volts:?} R {prior_inter_electrode_resistance:?}");
-                        drive_phase = DrivePhase::Done;
-                        eleco_dma = 0.;
-                        let growth_phase_end = chrono::Utc::now().timestamp();
-                        println!("end growth phase at: {growth_phase_end:?}");
-                    }
-                }
-                _ => {
-                    eleco_dma = 0.;
-                }
-            };
-        }
-        else {
-            eleco_dma = 0.1;
-        }
-
-        if abs_diff_ne!(last_eleco_dma, eleco_dma, epsilon = 0.01) {
-            sleep(Duration::from_millis(125)).await;
-            eleco_rma = set_electrode_current_drive(&mut ctx, eleco_dma).await?;
-            last_eleco_dma = eleco_dma;
-        }
-
-        sleep(Duration::from_millis(125)).await;
-        let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(&mut ctx).await?;
-        let estd_electrode_ma: f32 = 
-            if eleco_dma > 0. {
-                if elecm_ma > 0. { elecm_ma } else { eleco_rma}
-            }  else { 0. };
-        let inter_electrode_resistance = 
-            if estd_electrode_ma > 0. {
-                // this also covers the case where volts = 0.0, i.e. zero resistance.
-                elecm_volts / (estd_electrode_ma/1000.) 
-            }
-            else {
-                INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
-            };
-        prior_inter_electrode_resistance = inter_electrode_resistance;
-        prior_elecm_volts = elecm_volts;
-        prior_elecm_ma = elecm_ma;
+        control_electrodes(&mut ctx, &mut electrode_state, &furnace_state).await?;
 
         let timestamp = chrono::Utc::now().timestamp();
         let log_line = format!( "{},{},{:.2},{:.3},{:.3},{:.3},{:.3},{:.1}",
             timestamp,
             furnace_state.heater_on as u8,
             furnace_state.measured_temp_c,
-            eleco_dma, eleco_rma, elecm_ma,
-            elecm_volts, inter_electrode_resistance,
-            );
+            electrode_state.target_drive_ma, electrode_state.reported_drive_ma, electrode_state.measured_ma,
+            electrode_state.measured_volts, electrode_state.estimated_resistance_ohms,
+        );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
         csv_writer.flush()?;
     }
 
     println!("Shutting down outputs...");
+    sleep(Duration::from_millis(125)).await;
     toggle_furnace(&mut ctx, false);
 
     sleep(Duration::from_millis(125)).await;
