@@ -120,8 +120,8 @@ async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
 async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut FurnaceState) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    // first, measure current temperatur
-    sleep(Duration::from_millis(125));
+    // first, measure temperature
+    sleep(Duration::from_millis(100));
     let (ch1_tk_opt, ch2_tk_opt) = read_dual_tk_temps(ctx).await?;
     let tk1_c = ch1_tk_opt.unwrap_or(0f32);
     let tk2_c = ch2_tk_opt.unwrap_or(0f32);
@@ -140,7 +140,7 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
     state.measured_temp_c = avg_core_tk_c;
 
     // TODO proper bangbang controller
-    if state.measured_temp_c < ( state.setpoint_c  - 10.) {
+    if state.measured_temp_c < ( state.setpoint_c  - 5.) {
         if !state.heater_on {
             println!("set heater on at: {:.3} < {:.3}", state.measured_temp_c, state.setpoint_c);
             toggle_furnace(ctx, true).await?;
@@ -223,7 +223,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         control_furnace(&mut ctx, &mut furnace_state).await?;
 
-        if prior_inter_electrode_resistance < 8000. {
+        if prior_inter_electrode_resistance < 8000. 
+            || furnace_state.measured_temp_c > furnace_state.setpoint_c {
 
             match drive_phase {
                 DrivePhase::Init => {
