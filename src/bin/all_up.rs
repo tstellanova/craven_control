@@ -23,10 +23,11 @@ const PROBE_CHECK_TEMP_C:f32 = 550.; /// Temp at which we attempt to submerge th
 const PROBE_INSERTED_TEMP_C:f32 = 600.;/// Temp we expect to see when probe is succesfully inserted into melt
 const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 
-const MIN_INTER_ELECTRODE_OHMS: f32 = 16. * 1.5;
-const INF_INTER_ELECTRODE_OHMS: f32 = 60E3;
+const MIN_INTER_ELECTRODE_OHMS: f32 = 16.;
+const STABLE_DENDRITE_OHMS: f32 = 110.;
+const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 
-const NOMINAL_GROWTH_MA: f32 = 5.;
+const DENDRITE_CREEP_MA: f32 = 5.; // based on about 17/3
 const PROBE_CURRENT_MA: f32 = 1.;
 const COOLDOWN_PROBE_CURRENT_MA: f32 = 0.5;
 const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
@@ -37,6 +38,7 @@ const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
 async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 -> Result<(Option<f32>, Option<f32>), Box<dyn std::error::Error>> 
 {
+    sleep(Duration::from_millis(125));
     read_ykktc1202_dual_tk_temps(ctx).await
 }
 
@@ -48,6 +50,7 @@ async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
 -> Result<(f32, f32), Box<dyn std::error::Error>> 
 {
+    sleep(Duration::from_millis(125)).await;
 //    read_ykdaq1402_iv_adc(ctx).await
 
   let potential  = read_wa8tai_iv(ctx,1).await?;
@@ -113,9 +116,8 @@ enum DrivePhase {
 async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    sleep(Duration::from_millis(200)).await;
+    sleep(Duration::from_millis(125)).await;
     toggle_r4dvi04_relay(ctx,4, active).await?;
-    // sleep(Duration::from_millis(150)).await;
     Ok(())
 }
 
@@ -154,7 +156,6 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
     let mut new_temp_setpoint_c: f32 = 0.;
 
     // first, measure temperature
-    sleep(Duration::from_millis(125));
     let (ch1_tk_opt, ch2_tk_opt) = read_dual_tk_temps(ctx).await?;
     let tk1_c = ch1_tk_opt.unwrap_or(0f32);
     let tk2_c = ch2_tk_opt.unwrap_or(0f32);
@@ -243,7 +244,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 {
     let mut new_drive_ma: f32 = state.target_drive_ma;
     
-    sleep(Duration::from_millis(125)).await;
     let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
     let esimated_electrode_ma: f32 = 
         if state.target_drive_ma > 0. {
@@ -291,16 +291,21 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Growth => {  
-            if current_gap > 0.5 {
-                // try nudging down the drive current a bit
-                new_drive_ma = state.reported_drive_ma;
+            if state.estimated_resistance_ohms < STABLE_DENDRITE_OHMS {
+                if state.estimated_resistance_ohms < MIN_INTER_ELECTRODE_OHMS  {
+                    // inter-electrode resistance is close to zero, indicating that the electrode-electrode gap has been bridged
+                    println!("end growth phase with V {:?} R {:?}", state.measured_volts, state.estimated_resistance_ohms);
+                    state.drive_phase = DrivePhase::Cooldown;
+                    println!("end growth phase at: {:?}",chrono::Utc::now().timestamp());
+                }
+                else {
+                    // continue steady dendrite growth
+                    new_drive_ma = DENDRITE_CREEP_MA;
+                }
             }
-            // Terminate the current drive if we determine that resistance is close to zero (indicating
-            // that the electrode-electrode gap has been bridged by conductive material).
-            if state.estimated_resistance_ohms < MIN_INTER_ELECTRODE_OHMS  {
-                println!("end growth phase with V {:?} R {:?}", state.measured_volts, state.estimated_resistance_ohms);
-                state.drive_phase = DrivePhase::Cooldown;
-                println!("end growth phase at: {:?}",chrono::Utc::now().timestamp());
+            else if current_gap > 1.0 {
+                // try nudging down the drive current a bit
+                new_drive_ma = (state.target_drive_ma + state.reported_drive_ma) / 2.;
             }
         }
         DrivePhase::Cooldown => {
