@@ -29,6 +29,7 @@ const INF_INTER_ELECTRODE_OHMS: f32 = 60E3;
 const NOMINAL_GROWTH_MA: f32 = 5.;
 const PROBE_CURRENT_MA: f32 = 1.;
 const COOLDOWN_PROBE_CURRENT_MA: f32 = 0.5;
+const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
 
 /**
  * Read the dual thermocouple reader
@@ -165,7 +166,7 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
         else if ch2_tk_opt.is_some() { tk2_c.into() }
         else { MAX_PROBE_TEMP_C as f32};
     
-    if abs_diff_ne!(tk1_c, tk2_c, epsilon=10.) {
+    if abs_diff_ne!(tk1_c, tk2_c, epsilon=15.) {
         println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
     }
 
@@ -242,6 +243,24 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 {
     let mut new_drive_ma: f32 = state.target_drive_ma;
     
+    sleep(Duration::from_millis(125)).await;
+    let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
+    let esimated_electrode_ma: f32 = 
+        if state.target_drive_ma > 0. {
+            if elecm_ma > 0. { elecm_ma } else { state.reported_drive_ma}
+        }  else { 0. };
+    let inter_electrode_resistance = 
+        if esimated_electrode_ma > 0. {
+            // this also covers the case where volts = 0.0, i.e. zero resistance.
+            (1000. * elecm_volts) / esimated_electrode_ma 
+        }
+        else {
+            INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
+        };
+    state.estimated_resistance_ohms = inter_electrode_resistance;
+    state.measured_volts = elecm_volts;
+    state.measured_ma = elecm_ma;
+
     let current_gap: f32 = 
         if state.target_drive_ma >= PROBE_CURRENT_MA {
             state.target_drive_ma - state.measured_ma
@@ -268,7 +287,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
             else {
                 // slowly increase the desired drive current until measured current diverges
-                new_drive_ma = state.target_drive_ma + 0.1;
+                new_drive_ma = state.target_drive_ma + MIN_DRIVE_CURRENT_INCR_MA;
             }
         }
         DrivePhase::Growth => {  
@@ -291,29 +310,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
     };
 
-    if abs_diff_ne!(new_drive_ma, state.target_drive_ma, epsilon = 0.001) {
+    if abs_diff_ne!(new_drive_ma, state.target_drive_ma, epsilon = 0.01) {
         state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
     }
 
-    sleep(Duration::from_millis(125)).await;
-    let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
-    let esimated_electrode_ma: f32 = 
-        if state.target_drive_ma > 0. {
-            if elecm_ma > 0. { elecm_ma } else { state.reported_drive_ma}
-        }  else { 0. };
-    let inter_electrode_resistance = 
-        if esimated_electrode_ma > 0. {
-            // this also covers the case where volts = 0.0, i.e. zero resistance.
-            (1000. * elecm_volts) / esimated_electrode_ma 
-        }
-        else {
-            INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
-        };
-    state.estimated_resistance_ohms = inter_electrode_resistance;
-    state.measured_volts = elecm_volts;
-    state.measured_ma = elecm_ma;
     state.target_drive_ma = new_drive_ma;
-
 
     Ok(())
 }
