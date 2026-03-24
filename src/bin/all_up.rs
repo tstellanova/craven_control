@@ -24,8 +24,9 @@ const PROBE_INSERTED_TEMP_C:f32 = 600.;/// Temp we expect to see when probe is s
 const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 
 const MIN_INTER_ELECTRODE_OHMS: f32 = 16.;
-const STABLE_DENDRITE_OHMS: f32 = 110.;
+const STABLE_DENDRITE_OHMS: f32 = 90.;
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
+const PLATEAU_CURRENT_GAP_MA: f32 = 1.0;
 
 const DENDRITE_CREEP_MA: f32 = 5.; // based on about 17/3
 const PROBE_CURRENT_MA: f32 = 1.;
@@ -107,6 +108,7 @@ enum DrivePhase {
     Warmup = 0, // check that the electrode is immersed in conductive melt
     Anchoring = 1, /// Attach initial carbon atoms to cathode surface
     Growth = 2, /// Growth of carbon chains between electrodes
+    Dendrite = 3, // Stable dendrite growth?
     Cooldown = 4,
 } 
 
@@ -202,7 +204,7 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
             state.prior_max_temp_c = 0.; //reset
         }
     }
-    else if state.measured_temp_c > (new_temp_setpoint_c + 10.) {
+    else if state.measured_temp_c > (new_temp_setpoint_c + 15.) {
         if state.heater_on {
             println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, new_temp_setpoint_c);
             toggle_furnace(ctx, false).await?;
@@ -277,35 +279,40 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Anchoring => { 
-            if current_gap > 2.0 {
+            if current_gap > PLATEAU_CURRENT_GAP_MA {
                 // the actual current has diverged from desired current
-                println!("end anchor phase with target {:.3} mA :: actual {:.3} mA", 
+                println!("end Anchoring phase with target {:.3} mA :: actual {:.3} mA", 
                     state.target_drive_ma, state.measured_ma);
                 // transition to the next phase now that current has slightly diverged
                 state.drive_phase = DrivePhase::Growth;
-                println!("start growth phase at: {:?}",chrono::Utc::now().timestamp());
+                println!("end Anchoring phase at: {:?}",chrono::Utc::now().timestamp());
             }
             else {
                 // slowly increase the desired drive current until measured current diverges
-                new_drive_ma = state.target_drive_ma + MIN_DRIVE_CURRENT_INCR_MA;
+                new_drive_ma = state.target_drive_ma + 2.*MIN_DRIVE_CURRENT_INCR_MA;
             }
         }
         DrivePhase::Growth => {  
             if state.estimated_resistance_ohms < STABLE_DENDRITE_OHMS {
-                if state.estimated_resistance_ohms < MIN_INTER_ELECTRODE_OHMS  {
-                    // inter-electrode resistance is close to zero, indicating that the electrode-electrode gap has been bridged
-                    println!("end growth phase with V {:?} R {:?}", state.measured_volts, state.estimated_resistance_ohms);
-                    state.drive_phase = DrivePhase::Cooldown;
-                    println!("end growth phase at: {:?}",chrono::Utc::now().timestamp());
-                }
-                else {
-                    // continue steady dendrite growth
-                    new_drive_ma = DENDRITE_CREEP_MA;
-                }
+                // continue steady dendrite growth
+                println!("end Growth phase with V {:?} R {:?}", state.measured_volts, state.estimated_resistance_ohms);
+                state.drive_phase = DrivePhase::Dendrite;
+                println!("end Growth phase at: {:?}",chrono::Utc::now().timestamp());
             }
-            else if current_gap > 1.0 {
+            else if current_gap > 5.*MIN_DRIVE_CURRENT_INCR_MA {
                 // try nudging down the drive current a bit
                 new_drive_ma = (state.target_drive_ma + state.reported_drive_ma) / 2.;
+            }
+        }
+        DrivePhase::Dendrite => {
+            if state.estimated_resistance_ohms < MIN_INTER_ELECTRODE_OHMS  {
+                // inter-electrode resistance is close to zero, indicating that the electrode-electrode gap has been bridged
+                println!("end Dendrite phase with V {:?} R {:?}", state.measured_volts, state.estimated_resistance_ohms);
+                state.drive_phase = DrivePhase::Cooldown;
+                println!("end Dendrite phase at: {:?}",chrono::Utc::now().timestamp());
+            }
+            else {
+                new_drive_ma = DENDRITE_CREEP_MA;
             }
         }
         DrivePhase::Cooldown => {
