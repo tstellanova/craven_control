@@ -24,11 +24,11 @@ const PROBE_INSERTED_TEMP_C:f32 = 600.;/// Temp we expect to see when probe is s
 const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 
 const MIN_INTER_ELECTRODE_OHMS: f32 = 25.;
-const STABLE_DENDRITE_OHMS: f32 = 75.;
+const STABLE_DENDRITE_OHMS: f32 = 50.;
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 const PLATEAU_CURRENT_GAP_MA: f32 = 1.0;
 
-const DENDRITE_CREEP_MA: f32 = 5.; // based on about 17/3
+const DENDRITE_CREEP_MA: f32 = 12.; //midrange for 4-20 mA measurement
 const PROBE_CURRENT_MA: f32 = 1.;
 const COOLDOWN_PROBE_CURRENT_MA: f32 = 0.5;
 const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
@@ -265,7 +265,12 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
     let current_gap: f32 = 
         if state.target_drive_ma >= PROBE_CURRENT_MA {
-            state.target_drive_ma - state.measured_ma
+            if state.reported_drive_ma > state.measured_ma {
+                state.target_drive_ma - state.reported_drive_ma
+            }
+            else {
+                state.target_drive_ma - state.measured_ma
+            }
         }
         else { 100. }; // outrageously large current gap
 
