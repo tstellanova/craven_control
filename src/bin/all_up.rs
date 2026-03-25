@@ -23,8 +23,8 @@ const PROBE_CHECK_TEMP_C:f32 = 550.; /// Temp at which we attempt to submerge th
 const PROBE_INSERTED_TEMP_C:f32 = 600.;/// Temp we expect to see when probe is succesfully inserted into melt
 const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 
-const MIN_INTER_ELECTRODE_OHMS: f32 = 16.;
-const STABLE_DENDRITE_OHMS: f32 = 90.;
+const MIN_INTER_ELECTRODE_OHMS: f32 = 25.;
+const STABLE_DENDRITE_OHMS: f32 = 75.;
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 const PLATEAU_CURRENT_GAP_MA: f32 = 1.0;
 
