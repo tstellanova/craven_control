@@ -23,8 +23,8 @@ const PROBE_CHECK_TEMP_C:f32 = 550.; /// Temp at which we attempt to submerge th
 const PROBE_INSERTED_TEMP_C:f32 = 600.;/// Temp we expect to see when probe is succesfully inserted into melt
 const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 
-const MIN_INTER_ELECTRODE_OHMS: f32 = 25.;
-const STABLE_DENDRITE_OHMS: f32 = 50.;
+const MIN_INTER_ELECTRODE_OHMS: f32 = 10.;
+const STABLE_DENDRITE_OHMS: f32 = 25.;
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 const PLATEAU_CURRENT_GAP_MA: f32 = 1.0;
 
@@ -249,7 +249,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
     let esimated_electrode_ma: f32 = 
         if state.target_drive_ma > 0. {
-            if elecm_ma > 0. { elecm_ma } else { state.reported_drive_ma}
+            if state.reported_drive_ma > 0.2 {
+                if elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma } else { state.reported_drive_ma}
+            } else { 0. }
         }  else { 0. };
     let inter_electrode_resistance = 
         if esimated_electrode_ma > 0. {
