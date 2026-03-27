@@ -17,20 +17,33 @@ use std::sync::mpsc::channel;
 use approx::{AbsDiff, abs_diff_ne};
 use craven_control::*;
 
-
+/// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
-const PROBE_CHECK_TEMP_C:f32 = 550.; /// Temp at which we attempt to submerge thermo probes in electrolyte melt
-const PROBE_INSERTED_TEMP_C:f32 = 600.;/// Temp we expect to see when probe is succesfully inserted into melt
+/// Temp at which we attempt to submerge thermo probes in electrolyte melt
+const PROBE_CHECK_TEMP_C:f32 = 550.; 
+/// Temp we expect to see when probe is succesfully inserted into melt
+const PROBE_INSERTED_TEMP_C:f32 = 600.;
+/// The center temperature we are trying to achieve for the electrolyte melt
 const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 
+/// If the electrodes were shorted together at room temperature, what resistance do we expect?
 const MIN_INTER_ELECTRODE_OHMS: f32 = 5.;
+/// A guess at what a stable dendrite resistance would be when it approaches the anode
 const STABLE_DENDRITE_OHMS: f32 = 12.;
+/// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
+/// The measured gap between requested and actual current supplied by the current source, when they diverge. 
 const PLATEAU_CURRENT_GAP_MA: f32 = 2.0;
+/// Highest potential provided by current source (measured as 10.689) minus some slop
+const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
 
-const DENDRITE_CREEP_MA: f32 = 12.; //midrange for 4-20 mA measurement
+/// Midrange for 4-20 mA measurement
+const DENDRITE_CREEP_MA: f32 = 12.; 
+/// Used to probe for electrolyte or carbon bridge conductivity
 const PROBE_CURRENT_MA: f32 = 1.;
+/// Used after we think we've achieved a solid carbon bridge 
 const COOLDOWN_PROBE_CURRENT_MA: f32 = 0.5;
+/// The minimum increment for drive current, as specified in the current source docs
 const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
 
 /**
@@ -105,11 +118,16 @@ fn current_from_current_density_ma(density_ma_cm2: f64, wire_od_mm: f64, wire_le
 
 #[derive(Debug, Clone)]
 enum DrivePhase {
-    Warmup = 0, // check that the electrode is immersed in conductive melt
-    Anchoring = 1, /// Attach initial carbon atoms to cathode surface
-    Growth = 2, /// Growth of carbon chains between electrodes
-    Dendrite = 3, // Stable dendrite growth?
-    Cooldown = 4,
+    /// check that the electrode is immersed in conductive melt
+    Warmup = 0, 
+    /// Attach initial carbon atoms to cathode surface
+    Anchoring = 1, 
+     /// Growth of carbon chains between electrodes
+    Growth = 2,
+    /// Stable dendrite growth?
+    Dendrite = 3, 
+    /// Monitor the inter-electrode conductivity
+    Cooldown = 4, 
 } 
 
 /**
@@ -250,7 +268,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
     let esimated_electrode_ma: f32 = 
         if state.target_drive_ma > 0. {
-            if state.reported_drive_ma > (state.target_drive_ma/2.) {
+            if elecm_volts < OPEN_CIRCUIT_VOLTS {
                 if state.reported_drive_ma < 19.5 && elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma }
                 else { state.reported_drive_ma }
             } else { 0. }
