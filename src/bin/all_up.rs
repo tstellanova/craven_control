@@ -249,7 +249,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
     let esimated_electrode_ma: f32 = 
         if state.target_drive_ma > 0. {
-            if state.reported_drive_ma > 0.2 {
+            if state.reported_drive_ma > (state.target_drive_ma/3.) {
                 if elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma } else { state.reported_drive_ma}
             } else { 0. }
         }  else { 0. };
