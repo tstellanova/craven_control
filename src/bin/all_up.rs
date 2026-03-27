@@ -26,7 +26,7 @@ const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 const MIN_INTER_ELECTRODE_OHMS: f32 = 10.;
 const STABLE_DENDRITE_OHMS: f32 = 25.;
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
-const PLATEAU_CURRENT_GAP_MA: f32 = 1.0;
+const PLATEAU_CURRENT_GAP_MA: f32 = 2.0;
 
 const DENDRITE_CREEP_MA: f32 = 12.; //midrange for 4-20 mA measurement
 const PROBE_CURRENT_MA: f32 = 1.;
@@ -249,8 +249,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
     let esimated_electrode_ma: f32 = 
         if state.target_drive_ma > 0. {
-            if state.reported_drive_ma > (state.target_drive_ma/3.) {
-                if elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma } else { state.reported_drive_ma}
+            if state.reported_drive_ma > (state.target_drive_ma/2.) {
+                if state.reported_drive_ma < 19.5 && elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma }
+                else { state.reported_drive_ma }
             } else { 0. }
         }  else { 0. };
     let inter_electrode_resistance = 
