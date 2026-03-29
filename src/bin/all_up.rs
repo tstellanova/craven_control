@@ -24,16 +24,16 @@ const PROBE_CHECK_TEMP_C:f32 = 550.;
 /// Temp we expect to see when probe is succesfully inserted into melt
 const PROBE_INSERTED_TEMP_C:f32 = 600.;
 /// The center temperature we are trying to achieve for the electrolyte melt
-const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
+const ELECTROLYTE_TARGET_TEMP_C:f32 = 780.;
 
 /// If the electrodes were shorted together at room temperature, what resistance do we expect?
 const MIN_INTER_ELECTRODE_OHMS: f32 = 5.;
 /// A guess at what a stable dendrite resistance would be when it approaches the anode
-const STABLE_DENDRITE_OHMS: f32 = 12.;
+const STABLE_DENDRITE_OHMS: f32 = MIN_INTER_ELECTRODE_OHMS*2.;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
-const PLATEAU_CURRENT_GAP_MA: f32 = 2.0;
+const PLATEAU_CURRENT_GAP_MA: f32 = 2.5;
 /// Highest potential provided by current source (measured as 10.689) minus some slop
 const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
 
@@ -223,7 +223,7 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
             state.prior_max_temp_c = 0.; //reset
         }
     }
-    else if state.measured_temp_c > (new_temp_setpoint_c + 15.) {
+    else if state.measured_temp_c > (new_temp_setpoint_c + 10.) {
         if state.heater_on {
             println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, new_temp_setpoint_c);
             toggle_furnace(ctx, false).await?;
@@ -354,7 +354,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             else if state.estimated_resistance_ohms < STABLE_DENDRITE_OHMS {
                 // restart growth phase
                 println!("restart Growth phase with V {:?} R {:?}", state.measured_volts, state.estimated_resistance_ohms);
-                new_drive_ma =   state.growth_ma;
+                new_drive_ma =  state.growth_ma;
                 state.drive_phase = DrivePhase::Growth;
                 println!("restart Growth phase at: {:?}",chrono::Utc::now().timestamp());
             }
