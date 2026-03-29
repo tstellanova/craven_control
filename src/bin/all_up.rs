@@ -116,7 +116,8 @@ fn current_from_current_density_ma(density_ma_cm2: f64, wire_od_mm: f64, wire_le
     (density_ma_cm2  * electrode_surface_area) as f32
 }
 
-#[derive(Debug, Clone)]
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq)]
 enum DrivePhase {
     /// check that the electrode is immersed in conductive melt
     Warmup = 0, 
@@ -255,6 +256,17 @@ pub struct ElectrodeState {
     growth_ma: f32,
 }
 
+/// State the electrode controller is reset to when we're in "warmup" mode below the active melt temperature
+const WARMUP_ELECTRODE_STATE: ElectrodeState = 
+    ElectrodeState {
+            drive_phase:DrivePhase::Warmup,
+            estimated_resistance_ohms:INF_INTER_ELECTRODE_OHMS,
+            target_drive_ma:0.,
+            reported_drive_ma:0.,
+            measured_ma:0.,
+            measured_volts:0., 
+            growth_ma: 40. 
+        }; 
 /**
  * Adjust the electrode current based on melt condition and drive phase
  */
@@ -405,11 +417,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let mut electrode_state = 
-        ElectrodeState {drive_phase:DrivePhase::Warmup,estimated_resistance_ohms:INF_INTER_ELECTRODE_OHMS,target_drive_ma:0.,reported_drive_ma:0.,measured_ma:0.,measured_volts:0., growth_ma: 40. };
+        ElectrodeState {
+            drive_phase:DrivePhase::Warmup,
+            estimated_resistance_ohms:INF_INTER_ELECTRODE_OHMS,
+            target_drive_ma:0.,
+            reported_drive_ma:0.,
+            measured_ma:0.,
+            measured_volts:0., 
+            growth_ma: 40. 
+        };
 
     while running.load(Ordering::SeqCst) { 
         control_furnace(&mut ctx, &mut furnace_state).await?;
-        control_electrodes(&mut ctx, &mut electrode_state).await?;
+        if electrode_state.drive_phase == DrivePhase::Cooldown ||
+            furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C 
+        {
+            control_electrodes(&mut ctx, &mut electrode_state).await?;
+        }
+        else {
+            electrode_state = WARMUP_ELECTRODE_STATE;
+        }
 
         let timestamp = chrono::Utc::now().timestamp();
         let log_line = format!( "{},{},{:.2},{:.3},{:.3},{:.3},{:.3},{:.1}",
