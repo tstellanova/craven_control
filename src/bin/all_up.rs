@@ -34,7 +34,7 @@ const STABLE_DENDRITE_OHMS: f32 = MIN_INTER_ELECTRODE_OHMS*2.;
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
 const PLATEAU_CURRENT_GAP_MA: f32 = 2.5;
-/// Highest potential provided by current source (measured as 10.689) minus some slop
+/// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
 
 /// Midrange for 4-20 mA measurement
@@ -215,21 +215,37 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
     }
 
     // TODO proper bangbang controller?
-    if state.measured_temp_c < (new_temp_setpoint_c  - 5.) {
-        if !state.heater_on {
-            println!("set heater on at: {:.3} < {:.3}", state.measured_temp_c, new_temp_setpoint_c);
-            toggle_furnace(ctx, true).await?;
-            state.heater_on = true;
-            state.prior_max_temp_c = 0.; //reset
-        }
-    }
-    else if state.measured_temp_c > (new_temp_setpoint_c + 10.) {
-        if state.heater_on {
+    if state.heater_on {
+        if state.measured_temp_c > (new_temp_setpoint_c + 15.) {
             println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, new_temp_setpoint_c);
             toggle_furnace(ctx, false).await?;
             state.heater_on = false;
         }
     }
+    else {
+        if state.measured_temp_c < (new_temp_setpoint_c  + 7.5) {
+            println!("set heater on at: {:.3} (target {:.3} )", state.measured_temp_c, new_temp_setpoint_c);
+            toggle_furnace(ctx, true).await?;
+            state.heater_on = true;
+            state.prior_max_temp_c = 0.; //reset
+        }
+    }
+
+    // if state.measured_temp_c < (new_temp_setpoint_c  + 5.) {
+    //     if !state.heater_on {
+    //         println!("set heater on at: {:.3} (target {:.3} )", state.measured_temp_c, new_temp_setpoint_c);
+    //         toggle_furnace(ctx, true).await?;
+    //         state.heater_on = true;
+    //         state.prior_max_temp_c = 0.; //reset
+    //     }
+    // }
+    // else if state.measured_temp_c > (new_temp_setpoint_c + 15.) {
+    //     if state.heater_on {
+    //         println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, new_temp_setpoint_c);
+    //         toggle_furnace(ctx, false).await?;
+    //         state.heater_on = false;
+    //     }
+    // }
 
     state.setpoint_c = new_temp_setpoint_c;
 
@@ -339,7 +355,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.drive_phase = DrivePhase::Dendrite;
                 println!("end Growth phase at: {:?}",chrono::Utc::now().timestamp());
             }
-            else if current_gap > 5.*MIN_DRIVE_CURRENT_INCR_MA {
+            else if current_gap > PLATEAU_CURRENT_GAP_MA {
                 // try nudging down the drive current a bit
                 new_drive_ma = (state.target_drive_ma + state.reported_drive_ma) / 2.;
             }
