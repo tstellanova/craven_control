@@ -5,7 +5,7 @@ use std::process::exit;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::time::{sleep, sleep_until};
 use tokio_modbus::prelude::*;
 
 use tokio_modbus::client::{Client, Reader, Writer};
@@ -73,7 +73,6 @@ async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
   Ok((potential, current))
 }
 
-
 /**
  * Set the output drive current of the test electrodes 
  */
@@ -83,7 +82,6 @@ async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, mi
     println!("new eleco_ma: {milliamps:.3}");
     set_ykpvccs0100_current_drive(ctx, milliamps).await
 }
-
 
 /**
  * Verify that all the modules we expect to be connected to the RS-485 Modbus are,
@@ -142,7 +140,9 @@ async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
     Ok(())
 }
 
-
+/**
+ * Shut off the furnace heater, shut off any current drive.
+ */
 async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
 -> Result<(), Box<dyn std::error::Error>> 
 {
@@ -230,22 +230,6 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
             state.prior_max_temp_c = 0.; //reset
         }
     }
-
-    // if state.measured_temp_c < (new_temp_setpoint_c  + 5.) {
-    //     if !state.heater_on {
-    //         println!("set heater on at: {:.3} (target {:.3} )", state.measured_temp_c, new_temp_setpoint_c);
-    //         toggle_furnace(ctx, true).await?;
-    //         state.heater_on = true;
-    //         state.prior_max_temp_c = 0.; //reset
-    //     }
-    // }
-    // else if state.measured_temp_c > (new_temp_setpoint_c + 15.) {
-    //     if state.heater_on {
-    //         println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, new_temp_setpoint_c);
-    //         toggle_furnace(ctx, false).await?;
-    //         state.heater_on = false;
-    //     }
-    // }
 
     state.setpoint_c = new_temp_setpoint_c;
 
@@ -394,6 +378,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     Ok(())
 }
 
+
+
+/**
+ * Entry point
+ */
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Connect to Modbus apparatus via TCP server bridge (a WiFi bridge on our local network)
@@ -404,6 +393,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     enumerate_required_modules(&mut ctx).await?;
 
     zero_control_outputs(&mut ctx).await?;
+
+    const ONE_SEC_DURATION: Duration = Duration::from_millis(1000);
 
     let start_time = chrono::Utc::now().timestamp();
     let log_out_filename = format!("{}_recorder.csv",start_time);
@@ -444,6 +435,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
     while running.load(Ordering::SeqCst) { 
+        let current_instant = tokio::time::Instant::now();
+        let current_utc_dt = chrono::Utc::now();
+        let next_run_instant = current_instant + ONE_SEC_DURATION;
+
         control_furnace(&mut ctx, &mut furnace_state).await?;
         if electrode_state.drive_phase == DrivePhase::Cooldown ||
             furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C 
@@ -454,9 +449,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             electrode_state = WARMUP_ELECTRODE_STATE;
         }
 
-        let timestamp = chrono::Utc::now().timestamp();
         let log_line = format!( "{},{},{:.2},{:.3},{:.3},{:.3},{:.3},{:.1}",
-            timestamp,
+            current_utc_dt.timestamp(),
             furnace_state.heater_on as u8,
             furnace_state.measured_temp_c,
             electrode_state.target_drive_ma, electrode_state.reported_drive_ma, electrode_state.measured_ma,
@@ -465,8 +459,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
         csv_writer.flush()?;
+        
+        // During warmup, the state does not change very quickly
+        // This is an attempt to sync to about 1 Hz measurements
+        sleep_until(next_run_instant).await;
     }
 
+    // Attempt to shut off all outputs before exiting
     zero_control_outputs(&mut ctx).await?;
     ctx.disconnect().await?;
 
