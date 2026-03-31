@@ -351,7 +351,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.drive_phase = DrivePhase::Cooldown;
                 println!("end Dendrite phase at: {:?}",chrono::Utc::now().timestamp());
             }
-            else if state.estimated_resistance_ohms < STABLE_DENDRITE_OHMS {
+            else if state.estimated_resistance_ohms > STABLE_DENDRITE_OHMS {
                 // restart growth phase
                 println!("restart Growth phase with V {:?} R {:?}", state.measured_volts, state.estimated_resistance_ohms);
                 new_drive_ma =  state.growth_ma;
