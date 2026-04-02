@@ -298,12 +298,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
     let current_gap: f32 = 
         if state.target_drive_ma >= PROBE_CURRENT_MA {
-            if state.reported_drive_ma > state.measured_ma {
-                reported_gap
-            }
-            else {
-                measured_gap
-            }
+            measured_gap
         }
         else { 100. }; // outrageously large current gap
 
