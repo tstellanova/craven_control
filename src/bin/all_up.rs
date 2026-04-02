@@ -45,7 +45,8 @@ const PROBE_CURRENT_MA: f32 = 1.;
 const COOLDOWN_PROBE_CURRENT_MA: f32 = 0.5;
 /// The minimum increment for drive current, as specified in the current source docs
 const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
-
+/// The range of the ammeter
+const MAX_AMMETER_VAL: f32 = 20.0;
 /**
  * Read the dual thermocouple reader
  */
@@ -240,15 +241,10 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
     Ok(())
 }
 
-// 200 mA / cm^2 is ideal according to Y. Chen et al
-// const IDEAL_CURRENT_DENSITY_MA_CM2: f64 = 200.;
-// let ideal_current = current_from_current_density_ma(IDEAL_CURRENT_DENSITY_MA_CM2, 0.8, 10.);
-// println!("IDEAL_CURRENT: {ideal_current:?} mA");
-
 #[derive(Debug, Clone)]
 pub struct ElectrodeState {
     drive_phase: DrivePhase,
-    estimated_resistance_ohms: f32,
+    inter_electrode_ohms: f32,
     target_drive_ma: f32,
     reported_drive_ma: f32,
     measured_ma: f32,
@@ -260,7 +256,7 @@ pub struct ElectrodeState {
 const WARMUP_ELECTRODE_STATE: ElectrodeState = 
     ElectrodeState {
             drive_phase:DrivePhase::Warmup,
-            estimated_resistance_ohms:INF_INTER_ELECTRODE_OHMS,
+            inter_electrode_ohms:INF_INTER_ELECTRODE_OHMS,
             target_drive_ma:0.,
             reported_drive_ma:0.,
             measured_ma:0.,
@@ -281,11 +277,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let esimated_electrode_ma: f32 = 
         if state.target_drive_ma > 0. {
             if elecm_volts < OPEN_CIRCUIT_VOLTS {
-                if state.reported_drive_ma < 19.5 && elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma }
+                if state.reported_drive_ma < MAX_AMMETER_VAL && elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma }
                 else { state.reported_drive_ma }
             } else { 0. }
         }  else { 0. };
-    let inter_electrode_resistance = 
+    let inter_electrode_ohms = 
         if esimated_electrode_ma > 0. {
             // this also covers the case where volts = 0.0, i.e. zero resistance.
             (1000. * elecm_volts) / esimated_electrode_ma 
@@ -293,7 +289,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         else {
             INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
         };
-    state.estimated_resistance_ohms = inter_electrode_resistance;
+    state.inter_electrode_ohms = inter_electrode_ohms;
     state.measured_volts = elecm_volts;
     state.measured_ma = elecm_ma;
 
@@ -333,9 +329,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Growth => {  
-            if state.estimated_resistance_ohms < STABLE_DENDRITE_OHMS {
+            if state.inter_electrode_ohms < STABLE_DENDRITE_OHMS {
                 // continue steady dendrite growth
-                println!("end Growth phase with V {:?} R {:?}", state.measured_volts, state.estimated_resistance_ohms);
+                println!("end Growth phase with V {:?} R {:?}", state.measured_volts, state.inter_electrode_ohms);
                 state.drive_phase = DrivePhase::Dendrite;
                 println!("end Growth phase at: {:?}",chrono::Utc::now().timestamp());
             }
@@ -345,15 +341,15 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Dendrite => {
-            if state.estimated_resistance_ohms < MIN_INTER_ELECTRODE_OHMS  {
+            if state.inter_electrode_ohms < MIN_INTER_ELECTRODE_OHMS  {
                 // inter-electrode resistance is close to zero, indicating that the electrode-electrode gap has been bridged
-                println!("end Dendrite phase with V {:?} R {:?}", state.measured_volts, state.estimated_resistance_ohms);
+                println!("end Dendrite phase with V {:?} R {:?}", state.measured_volts, state.inter_electrode_ohms);
                 state.drive_phase = DrivePhase::Cooldown;
                 println!("end Dendrite phase at: {:?}",chrono::Utc::now().timestamp());
             }
-            else if state.estimated_resistance_ohms > STABLE_DENDRITE_OHMS {
+            else if state.inter_electrode_ohms > STABLE_DENDRITE_OHMS {
                 // restart growth phase
-                println!("restart Growth phase with V {:?} R {:?}", state.measured_volts, state.estimated_resistance_ohms);
+                println!("restart Growth phase with V {:?} R {:?}", state.measured_volts, state.inter_electrode_ohms);
                 new_drive_ma =  state.growth_ma;
                 state.drive_phase = DrivePhase::Growth;
                 println!("restart Growth phase at: {:?}",chrono::Utc::now().timestamp());
@@ -426,7 +422,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut electrode_state = 
         ElectrodeState {
             drive_phase:DrivePhase::Warmup,
-            estimated_resistance_ohms:INF_INTER_ELECTRODE_OHMS,
+            inter_electrode_ohms:INF_INTER_ELECTRODE_OHMS,
             target_drive_ma:0.,
             reported_drive_ma:0.,
             measured_ma:0.,
@@ -454,7 +450,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             furnace_state.heater_on as u8,
             furnace_state.measured_temp_c,
             electrode_state.target_drive_ma, electrode_state.reported_drive_ma, electrode_state.measured_ma,
-            electrode_state.measured_volts, electrode_state.estimated_resistance_ohms,
+            electrode_state.measured_volts, electrode_state.inter_electrode_ohms,
         );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
