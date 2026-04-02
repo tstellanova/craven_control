@@ -274,32 +274,35 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let mut new_drive_ma: f32 = state.target_drive_ma;
     
     let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
-    let esimated_electrode_ma: f32 = 
+    let measured_electrode_ma: f32 = 
         if state.target_drive_ma > 0. {
             if elecm_volts < OPEN_CIRCUIT_VOLTS {
-                if state.reported_drive_ma < MAX_AMMETER_VAL && elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma }
+                if elecm_ma < MAX_AMMETER_VAL && elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma }
                 else { state.reported_drive_ma }
             } else { 0. }
         }  else { 0. };
     let inter_electrode_ohms = 
-        if esimated_electrode_ma > 0. {
+        if measured_electrode_ma > 0. {
             // this also covers the case where volts = 0.0, i.e. zero resistance.
-            (1000. * elecm_volts) / esimated_electrode_ma 
+            (1000. * elecm_volts) / measured_electrode_ma 
         }
         else {
             INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
         };
     state.inter_electrode_ohms = inter_electrode_ohms;
     state.measured_volts = elecm_volts;
-    state.measured_ma = elecm_ma;
+    state.measured_ma = measured_electrode_ma;
+
+    let reported_gap = state.target_drive_ma - state.reported_drive_ma;
+    let measured_gap = state.target_drive_ma - measured_electrode_ma;
 
     let current_gap: f32 = 
         if state.target_drive_ma >= PROBE_CURRENT_MA {
             if state.reported_drive_ma > state.measured_ma {
-                state.target_drive_ma - state.reported_drive_ma
+                reported_gap
             }
             else {
-                state.target_drive_ma - state.measured_ma
+                measured_gap
             }
         }
         else { 100. }; // outrageously large current gap
@@ -335,9 +338,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.drive_phase = DrivePhase::Dendrite;
                 println!("end Growth phase at: {:?}",chrono::Utc::now().timestamp());
             }
-            else if current_gap > PLATEAU_CURRENT_GAP_MA {
+            else if reported_gap > PLATEAU_CURRENT_GAP_MA {
                 // try nudging down the drive current a bit
-                new_drive_ma = (state.target_drive_ma + state.reported_drive_ma) / 2.;
+                new_drive_ma = (2.*state.target_drive_ma + state.reported_drive_ma) / 3.;
             }
         }
         DrivePhase::Dendrite => {
