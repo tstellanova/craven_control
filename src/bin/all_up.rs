@@ -18,8 +18,7 @@ use approx::{AbsDiff, abs_diff_ne};
 use craven_control::*;
 
 
-const ONE_SEC_DURATION: Duration = Duration::from_millis(1000);
-const INTER_LOOP_DELAY: Duration = Duration::from_millis(500);
+const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
 const MODBUS_RW_DELAY: Duration = Duration::from_millis(50);
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
@@ -34,7 +33,7 @@ const ELECTROLYTE_TARGET_TEMP_C:f32 = 780.;
 /// If the electrodes were shorted together at room temperature, what resistance do we expect?
 const MIN_INTER_ELECTRODE_OHMS: f32 = 5.;
 /// A guess at what a stable dendrite resistance would be when it approaches the anode
-const STABLE_DENDRITE_OHMS: f32 = MIN_INTER_ELECTRODE_OHMS*2.;
+const STABLE_DENDRITE_OHMS: f32 = 20.;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
@@ -306,15 +305,14 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
         else { 100. }; // outrageously large current gap
 
-    // momentarily disable current
-    let probe_reported_ma = set_electrode_current_drive(ctx, PROBE_CURRENT_MA).await?;
-    if probe_reported_ma != PROBE_CURRENT_MA {
-        println!("probe_reported_ma: {probe_reported_ma:.3}");
+    if state.drive_phase == DrivePhase::Growth {
+        // momentarily disable current
+        let probe_reported_ma = set_electrode_current_drive(ctx, PROBE_CURRENT_MA).await?;
+        if probe_reported_ma != PROBE_CURRENT_MA {
+            println!("probe_reported_ma: {probe_reported_ma:.3}");
+        }
     }
-    let probe_reported_ma = set_electrode_current_drive(ctx, PROBE_CURRENT_MA).await?;
-    if probe_reported_ma != PROBE_CURRENT_MA {
-        println!("probe_reported_ma: {probe_reported_ma:.3}");
-    }
+
     match state.drive_phase {
         DrivePhase::Warmup => {
             new_drive_ma = PROBE_CURRENT_MA;
@@ -458,7 +456,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             electrode_state = WARMUP_ELECTRODE_STATE;
         }
 
-        let log_line = format!( "{},{},{:.2},{:.3},{:.3},{:.3},{:.3},{:.1}",
+        let log_line = format!( "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.1}",
             current_utc_dt.timestamp(),
             furnace_state.heater_on as u8,
             furnace_state.measured_temp_c,
