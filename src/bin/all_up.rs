@@ -17,6 +17,10 @@ use std::sync::mpsc::channel;
 use approx::{AbsDiff, abs_diff_ne};
 use craven_control::*;
 
+
+const ONE_SEC_DURATION: Duration = Duration::from_millis(1000);
+const MODBUS_RW_DELAY: Duration = Duration::from_millis(100);
+
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
 /// Temp at which we attempt to submerge thermo probes in electrolyte melt
@@ -53,7 +57,7 @@ const MAX_AMMETER_VAL: f32 = 20.0;
 async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 -> Result<(Option<f32>, Option<f32>), Box<dyn std::error::Error>> 
 {
-    sleep(Duration::from_millis(125));
+    sleep(MODBUS_RW_DELAY);
     read_ykktc1202_dual_tk_temps(ctx).await
 }
 
@@ -65,7 +69,7 @@ async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
 -> Result<(f32, f32), Box<dyn std::error::Error>> 
 {
-    sleep(Duration::from_millis(125)).await;
+    sleep(Duration::from_millis(100)).await;
 //    read_ykdaq1402_iv_adc(ctx).await
 
   let potential  = read_wa8tai_iv(ctx,1).await?;
@@ -79,7 +83,7 @@ async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
  */
 async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<f32, Box<dyn std::error::Error>> 
 {
-    sleep(Duration::from_millis(125)).await;
+    sleep(MODBUS_RW_DELAY).await;
     println!("new eleco_ma: {milliamps:.3}");
     set_ykpvccs0100_current_drive(ctx, milliamps).await
 }
@@ -136,7 +140,7 @@ enum DrivePhase {
 async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    sleep(Duration::from_millis(125)).await;
+    sleep(MODBUS_RW_DELAY).await;
     toggle_r4dvi04_relay(ctx,4, active).await?;
     Ok(())
 }
@@ -387,8 +391,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     enumerate_required_modules(&mut ctx).await?;
 
     zero_control_outputs(&mut ctx).await?;
-
-    const ONE_SEC_DURATION: Duration = Duration::from_millis(1000);
 
     let start_time = chrono::Utc::now().timestamp();
     let log_out_filename = format!("{}_recorder.csv",start_time);
