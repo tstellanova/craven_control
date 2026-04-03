@@ -19,7 +19,8 @@ use craven_control::*;
 
 
 const ONE_SEC_DURATION: Duration = Duration::from_millis(1000);
-const MODBUS_RW_DELAY: Duration = Duration::from_millis(100);
+const INTER_LOOP_DELAY: Duration = Duration::from_millis(500);
+const MODBUS_RW_DELAY: Duration = Duration::from_millis(50);
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -37,7 +38,7 @@ const STABLE_DENDRITE_OHMS: f32 = MIN_INTER_ELECTRODE_OHMS*2.;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
-const PLATEAU_CURRENT_GAP_MA: f32 = 2.5;
+const PLATEAU_CURRENT_GAP_MA: f32 = 4.0;
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
 
@@ -84,7 +85,6 @@ async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
 async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<f32, Box<dyn std::error::Error>> 
 {
     sleep(MODBUS_RW_DELAY).await;
-    println!("new eleco_ma: {milliamps:.3}");
     set_ykpvccs0100_current_drive(ctx, milliamps).await
 }
 
@@ -306,6 +306,15 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
         else { 100. }; // outrageously large current gap
 
+    // momentarily disable current
+    let probe_reported_ma = set_electrode_current_drive(ctx, PROBE_CURRENT_MA).await?;
+    if probe_reported_ma != PROBE_CURRENT_MA {
+        println!("probe_reported_ma: {probe_reported_ma:.3}");
+    }
+    let probe_reported_ma = set_electrode_current_drive(ctx, PROBE_CURRENT_MA).await?;
+    if probe_reported_ma != PROBE_CURRENT_MA {
+        println!("probe_reported_ma: {probe_reported_ma:.3}");
+    }
     match state.drive_phase {
         DrivePhase::Warmup => {
             new_drive_ma = PROBE_CURRENT_MA;
@@ -316,7 +325,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Anchoring => { 
-            if current_gap > PLATEAU_CURRENT_GAP_MA {
+            if reported_gap > PLATEAU_CURRENT_GAP_MA {
                 // the actual current has diverged from desired current
                 state.growth_ma =  state.target_drive_ma;
                 println!("end Anchoring phase with target {:.3} mA :: actual {:.3} mA", 
@@ -325,9 +334,12 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.drive_phase = DrivePhase::Growth;
                 println!("end Anchoring phase at: {:?}",chrono::Utc::now().timestamp());
             }
+            else if reported_gap > 1.0 {
+                new_drive_ma = state.target_drive_ma + 2.*MIN_DRIVE_CURRENT_INCR_MA;
+            }
             else {
                 // slowly increase the desired drive current until measured current diverges
-                new_drive_ma = state.target_drive_ma + 2.*MIN_DRIVE_CURRENT_INCR_MA;
+                new_drive_ma = state.target_drive_ma + 5.*MIN_DRIVE_CURRENT_INCR_MA;
             }
         }
         DrivePhase::Growth => {  
@@ -337,7 +349,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.drive_phase = DrivePhase::Dendrite;
                 println!("end Growth phase at: {:?}",chrono::Utc::now().timestamp());
             }
-            else if reported_gap > PLATEAU_CURRENT_GAP_MA {
+            else if reported_gap > 1.5*PLATEAU_CURRENT_GAP_MA {
                 // try nudging down the drive current a bit
                 new_drive_ma = (2.*state.target_drive_ma + state.reported_drive_ma) / 3.;
             }
@@ -367,9 +379,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
     };
 
-    if abs_diff_ne!(new_drive_ma, state.target_drive_ma, epsilon = 0.01) {
+    // if abs_diff_ne!(new_drive_ma, state.target_drive_ma, epsilon = 0.01) {
+    //     println!("new_drive: {new_drive_ma:.3} mA");
         state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
-    }
+    // }
 
     state.target_drive_ma = new_drive_ma;
 
@@ -433,7 +446,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     while running.load(Ordering::SeqCst) { 
         let current_instant = tokio::time::Instant::now();
         let current_utc_dt = chrono::Utc::now();
-        let next_run_instant = current_instant + ONE_SEC_DURATION;
+        let next_run_instant = current_instant + INTER_LOOP_DELAY;
 
         control_furnace(&mut ctx, &mut furnace_state).await?;
         if electrode_state.drive_phase == DrivePhase::Cooldown ||
