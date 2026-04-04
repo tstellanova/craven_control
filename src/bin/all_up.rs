@@ -31,18 +31,22 @@ const PROBE_INSERTED_TEMP_C:f32 = 600.;
 const ELECTROLYTE_TARGET_TEMP_C:f32 = 780.;
 
 /// If the electrodes were shorted together at room temperature, what resistance do we expect?
-const MIN_INTER_ELECTRODE_OHMS: f32 = 5.;
+const MIN_INTER_ELECTRODE_OHMS: f32 = 18.;
+
+/// The EWMA of dR/dt drops below this value when a dendrite forms
+const DENDRITE_OHM_RATE_CLIFF: f32 = -0.7;
+
 /// A guess at what a stable dendrite resistance would be when it approaches the anode
 const STABLE_DENDRITE_OHMS: f32 = 20.;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
-const PLATEAU_CURRENT_GAP_MA: f32 = 4.0;
+const PLATEAU_CURRENT_GAP_MA: f32 = 5.0;
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
 
-/// Midrange for 4-20 mA measurement
-const DENDRITE_CREEP_MA: f32 = 12.; 
+/// Used when dendrite has formed
+const DENDRITE_CREEP_MA: f32 = 4.; 
 /// Used to probe for electrolyte or carbon bridge conductivity
 const PROBE_CURRENT_MA: f32 = 1.;
 /// Used after we think we've achieved a solid carbon bridge 
@@ -51,6 +55,17 @@ const COOLDOWN_PROBE_CURRENT_MA: f32 = 0.5;
 const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
 /// The range of the ammeter
 const MAX_AMMETER_VAL: f32 = 20.0;
+
+
+
+/// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
+const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
+
+/// Update the given Exponential Weighted Moving Average with a new value
+fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
+    *ewma = alpha * new_value + (1.0 - alpha) * *ewma;
+}
+
 /**
  * Read the dual thermocouple reader
  */
@@ -172,6 +187,13 @@ pub struct FurnaceState {
 
 }
 
+const INITIAL_FURNACE_STATE: FurnaceState = FurnaceState  { 
+        prior_max_temp_c: 0., 
+        setpoint_c: PROBE_CHECK_TEMP_C, /// Heat until we can attempt probe insertion into melt
+        measured_temp_c: 0., 
+        heater_on: false 
+    };
+
 /**
  * Turn the furnace heating on/off based on setpoint and temperature
  */
@@ -247,7 +269,10 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
 #[derive(Debug, Clone)]
 pub struct ElectrodeState {
     drive_phase: DrivePhase,
+    last_update_millis: i64,
     inter_electrode_ohms: f32,
+    /// Exponential moving average of the rate of change (dR/dt) of inter-electrode resistance
+    ohms_rate_ewma: f32,
     target_drive_ma: f32,
     reported_drive_ma: f32,
     measured_ma: f32,
@@ -256,10 +281,12 @@ pub struct ElectrodeState {
 }
 
 /// State the electrode controller is reset to when we're in "warmup" mode below the active melt temperature
-const WARMUP_ELECTRODE_STATE: ElectrodeState = 
+const INITIAL_ELECTRODE_STATE: ElectrodeState = 
     ElectrodeState {
             drive_phase:DrivePhase::Warmup,
+            last_update_millis:0,
             inter_electrode_ohms:INF_INTER_ELECTRODE_OHMS,
+            ohms_rate_ewma:0.,
             target_drive_ma:0.,
             reported_drive_ma:0.,
             measured_ma:0.,
@@ -274,6 +301,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 ) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
+    let now_utc_dt = chrono::Utc::now();
+    let now_millis = now_utc_dt.timestamp_millis();
+
     let mut new_drive_ma: f32 = state.target_drive_ma;
     
     let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
@@ -292,6 +322,18 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         else {
             INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
         };
+
+    let mut dendrite_formed = false;
+    // Calculate dR/dt, EWMA of dR/dt, then look for drops of -0.5
+    if inter_electrode_ohms != INF_INTER_ELECTRODE_OHMS {
+        let delta_secs = ((now_millis - state.last_update_millis) as f32)/1000.;
+        let dr_dt = (inter_electrode_ohms - state.inter_electrode_ohms)/delta_secs;
+        update_ewma(&mut state.ohms_rate_ewma,dr_dt, RESISTANCE_EWMA_ALPHA);
+        if state.ohms_rate_ewma <= DENDRITE_OHM_RATE_CLIFF {
+            dendrite_formed = true;
+        }
+    }
+
     state.inter_electrode_ohms = inter_electrode_ohms;
     state.measured_volts = elecm_volts;
     state.measured_ma = measured_electrode_ma;
@@ -305,11 +347,12 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
         else { 100. }; // outrageously large current gap
 
-    if state.drive_phase == DrivePhase::Growth {
+    if state.drive_phase == DrivePhase::Anchoring || state.drive_phase == DrivePhase::Growth
+    {
         // momentarily disable current
         let probe_reported_ma = set_electrode_current_drive(ctx, PROBE_CURRENT_MA).await?;
         if probe_reported_ma != PROBE_CURRENT_MA {
-            println!("probe_reported_ma: {probe_reported_ma:.3}");
+            println!("probe_reported_ma: {probe_reported_ma:.3} ");
         }
     }
 
@@ -325,7 +368,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Anchoring => { 
             if reported_gap > PLATEAU_CURRENT_GAP_MA {
                 // the actual current has diverged from desired current
-                state.growth_ma =  state.target_drive_ma;
+                state.growth_ma = state.target_drive_ma;
                 println!("end Anchoring phase with target {:.3} mA :: actual {:.3} mA", 
                     state.target_drive_ma, state.measured_ma);
                 // transition to the next phase now that current has slightly diverged
@@ -333,38 +376,32 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 println!("end Anchoring phase at: {:?}",chrono::Utc::now().timestamp());
             }
             else if reported_gap > 1.0 {
+                // slow down the rate of increasing current
                 new_drive_ma = state.target_drive_ma + 2.*MIN_DRIVE_CURRENT_INCR_MA;
             }
             else {
-                // slowly increase the desired drive current until measured current diverges
-                new_drive_ma = state.target_drive_ma + 5.*MIN_DRIVE_CURRENT_INCR_MA;
+                // increase the desired drive current until reported current diverges
+                new_drive_ma = state.target_drive_ma + 10.*MIN_DRIVE_CURRENT_INCR_MA;
             }
         }
         DrivePhase::Growth => {  
-            if state.inter_electrode_ohms < STABLE_DENDRITE_OHMS {
-                // continue steady dendrite growth
-                println!("end Growth phase with V {:?} R {:?}", state.measured_volts, state.inter_electrode_ohms);
+            if dendrite_formed {
+                // switch to dendrite preservation
                 state.drive_phase = DrivePhase::Dendrite;
-                println!("end Growth phase at: {:?}",chrono::Utc::now().timestamp());
+                println!("{:?} end Growth phase with V {:.2} R {:.2} dR/dt {:.3}", 
+                    chrono::Utc::now().timestamp(), state.measured_volts, state.inter_electrode_ohms, state.ohms_rate_ewma);
             }
-            else if reported_gap > 1.5*PLATEAU_CURRENT_GAP_MA {
-                // try nudging down the drive current a bit
-                new_drive_ma = (2.*state.target_drive_ma + state.reported_drive_ma) / 3.;
-            }
+            // else if reported_gap > 1.5*PLATEAU_CURRENT_GAP_MA {
+            //     // try nudging down the drive current a bit
+            //     new_drive_ma = (2.*state.target_drive_ma + state.reported_drive_ma) / 3.;
+            // }
         }
         DrivePhase::Dendrite => {
             if state.inter_electrode_ohms < MIN_INTER_ELECTRODE_OHMS  {
                 // inter-electrode resistance is close to zero, indicating that the electrode-electrode gap has been bridged
-                println!("end Dendrite phase with V {:?} R {:?}", state.measured_volts, state.inter_electrode_ohms);
                 state.drive_phase = DrivePhase::Cooldown;
-                println!("end Dendrite phase at: {:?}",chrono::Utc::now().timestamp());
-            }
-            else if state.inter_electrode_ohms > STABLE_DENDRITE_OHMS {
-                // restart growth phase
-                println!("restart Growth phase with V {:?} R {:?}", state.measured_volts, state.inter_electrode_ohms);
-                new_drive_ma =  state.growth_ma;
-                state.drive_phase = DrivePhase::Growth;
-                println!("restart Growth phase at: {:?}",chrono::Utc::now().timestamp());
+                println!("{:?} end Dendrite phase with V {:.2} R {:.2} dR/dt {:.3}", 
+                    chrono::Utc::now().timestamp(), state.measured_volts, state.inter_electrode_ohms, state.ohms_rate_ewma);
             }
             else {
                 new_drive_ma = DENDRITE_CREEP_MA;
@@ -377,12 +414,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
     };
 
-    // if abs_diff_ne!(new_drive_ma, state.target_drive_ma, epsilon = 0.01) {
-    //     println!("new_drive: {new_drive_ma:.3} mA");
-        state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
-    // }
-
+    // Now, update the drive current for the remainder of the main loop duration
+    state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
     state.target_drive_ma = new_drive_ma;
+    state.last_update_millis = now_millis;
 
     Ok(())
 }
@@ -423,23 +458,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         r.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
 
-    let mut furnace_state = FurnaceState  { 
-        prior_max_temp_c: 0., 
-        setpoint_c: PROBE_CHECK_TEMP_C, /// Heat until we can attempt probe insertion into melt
-        measured_temp_c: 0., 
-        heater_on: false 
-    };
-
-    let mut electrode_state = 
-        ElectrodeState {
-            drive_phase:DrivePhase::Warmup,
-            inter_electrode_ohms:INF_INTER_ELECTRODE_OHMS,
-            target_drive_ma:0.,
-            reported_drive_ma:0.,
-            measured_ma:0.,
-            measured_volts:0., 
-            growth_ma: 40. 
-        };
+    let mut furnace_state = INITIAL_FURNACE_STATE;
+    let mut electrode_state =  INITIAL_ELECTRODE_STATE;
 
     while running.load(Ordering::SeqCst) { 
         let current_instant = tokio::time::Instant::now();
@@ -447,28 +467,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let next_run_instant = current_instant + INTER_LOOP_DELAY;
 
         control_furnace(&mut ctx, &mut furnace_state).await?;
-        if electrode_state.drive_phase == DrivePhase::Cooldown ||
-            furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C 
+        if furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C  ||
+            electrode_state.drive_phase == DrivePhase::Cooldown 
         {
             control_electrodes(&mut ctx, &mut electrode_state).await?;
         }
         else {
-            electrode_state = WARMUP_ELECTRODE_STATE;
+            electrode_state = INITIAL_ELECTRODE_STATE;
         }
 
-        let log_line = format!( "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.1}",
+        let log_line = format!( "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.1},{:.3}",
             current_utc_dt.timestamp(),
             furnace_state.heater_on as u8,
             furnace_state.measured_temp_c,
             electrode_state.target_drive_ma, electrode_state.reported_drive_ma, electrode_state.measured_ma,
             electrode_state.measured_volts, electrode_state.inter_electrode_ohms,
+            electrode_state.ohms_rate_ewma
         );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
         csv_writer.flush()?;
         
-        // During warmup, the state does not change very quickly
-        // This is an attempt to sync to about 1 Hz measurements
+        // Attempt to sync to about 1 Hz measurements
         sleep_until(next_run_instant).await;
     }
 
