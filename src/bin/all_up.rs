@@ -19,7 +19,9 @@ use craven_control::*;
 
 
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
-const MODBUS_RW_DELAY: Duration = Duration::from_millis(50);
+const MODBUS_RW_DELAY: Duration = Duration::from_millis(25);
+const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
+const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(50);
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -31,17 +33,17 @@ const PROBE_INSERTED_TEMP_C:f32 = 600.;
 const ELECTROLYTE_TARGET_TEMP_C:f32 = 780.;
 
 /// If the electrodes were shorted together at room temperature, what resistance do we expect?
-const MIN_INTER_ELECTRODE_OHMS: f32 = 18.;
+const MIN_INTER_ELECTRODE_OHMS: f32 = 19.;
 
 /// The EWMA of dR/dt drops below this value when a dendrite forms
-const DENDRITE_OHM_RATE_CLIFF: f32 = -0.7;
+const DENDRITE_OHM_RATE_CLIFF: f32 = -0.75;
 
 /// A guess at what a stable dendrite resistance would be when it approaches the anode
 const STABLE_DENDRITE_OHMS: f32 = 20.;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
-const PLATEAU_CURRENT_GAP_MA: f32 = 5.0;
+const PLATEAU_CURRENT_GAP_MA: f32 = 6.0;
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
 
@@ -59,7 +61,7 @@ const MAX_AMMETER_VAL: f32 = 20.0;
 
 
 /// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
-const RESISTANCE_EWMA_ALPHA: f32 = 0.1;
+const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -353,10 +355,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     if state.drive_phase == DrivePhase::Anchoring || state.drive_phase == DrivePhase::Growth
     {
         // momentarily disable current
-        let probe_reported_ma = set_electrode_current_drive(ctx, PROBE_CURRENT_MA).await?;
-        if probe_reported_ma != PROBE_CURRENT_MA {
+        let probe_reported_ma = set_electrode_current_drive(ctx, 0.).await?;
+        if probe_reported_ma != 0. {
             println!("probe_reported_ma: {probe_reported_ma:.3} ");
         }
+        sleep(HOLD_ZERO_PULSE_TIME).await;
     }
 
     match state.drive_phase {
@@ -374,8 +377,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.drive_phase = DrivePhase::Growth;
                 state.growth_ma = state.target_drive_ma;
                 state.ohms_rate_ewma = 0.; //reset because it's scrambled by prior descent
-                println!("{:?} end Anchoring phase with target {:.3} mA :: actual {:.3} mA", 
-                    chrono::Utc::now().timestamp(), state.target_drive_ma, state.measured_ma);
+                println!("{:?} end Anchoring phase with target {:.3} mA vs reported {:.3} mA", 
+                    chrono::Utc::now().timestamp(), state.target_drive_ma, state.reported_drive_ma);
             }
             else if reported_gap > 1.0 {
                 // slow down the rate of increasing current
