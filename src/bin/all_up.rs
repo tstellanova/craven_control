@@ -59,7 +59,7 @@ const MAX_AMMETER_VAL: f32 = 20.0;
 
 
 /// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
-const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
+const RESISTANCE_EWMA_ALPHA: f32 = 0.1;
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -208,15 +208,18 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
     let tk2_c = ch2_tk_opt.unwrap_or(0f32);
     let mut avg_core_tk_c: f32 = 
         if ch1_tk_opt.is_some() {
-            if ch2_tk_opt.is_some() {  (tk1_c + tk2_c) / 2f32 }
+            if ch2_tk_opt.is_some() {  
+                if abs_diff_ne!(tk1_c, tk2_c, epsilon=15.) {
+                    println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C ");
+                }
+                (tk1_c + tk2_c) / 2f32 
+            }
             else { tk1_c.into()}
         }
         else if ch2_tk_opt.is_some() { tk2_c.into() }
         else { MAX_PROBE_TEMP_C as f32};
     
-    if abs_diff_ne!(tk1_c, tk2_c, epsilon=15.) {
-        println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C avg: {avg_core_tk_c:?}°C");
-    }
+
 
     state.measured_temp_c = avg_core_tk_c;
 
@@ -368,12 +371,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Anchoring => { 
             if reported_gap > PLATEAU_CURRENT_GAP_MA {
                 // the actual current has diverged from desired current
-                state.growth_ma = state.target_drive_ma;
-                println!("end Anchoring phase with target {:.3} mA :: actual {:.3} mA", 
-                    state.target_drive_ma, state.measured_ma);
-                // transition to the next phase now that current has slightly diverged
                 state.drive_phase = DrivePhase::Growth;
-                println!("end Anchoring phase at: {:?}",chrono::Utc::now().timestamp());
+                state.growth_ma = state.target_drive_ma;
+                state.ohms_rate_ewma = 0.; //reset because it's scrambled by prior descent
+                println!("{:?} end Anchoring phase with target {:.3} mA :: actual {:.3} mA", 
+                    chrono::Utc::now().timestamp(), state.target_drive_ma, state.measured_ma);
             }
             else if reported_gap > 1.0 {
                 // slow down the rate of increasing current
@@ -444,7 +446,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R";
+    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R,dRdT";
     println!("{}",CSV_HEADER);
     writeln!(csv_writer, "{}", CSV_HEADER)?;
 
