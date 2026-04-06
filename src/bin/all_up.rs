@@ -51,7 +51,7 @@ const SMALL_SEP_ANCHOR_CURRENT_MA: f32 = 25.;
 /// Brute force anchoring overcurrent (based on measured values for small gaps)
 const BRUTE_ANCHOR_CURRENT_MA: f32 = 2. * SMALL_SEP_ANCHOR_CURRENT_MA; 
 /// Brute force anchoring expected current gap
-const BRUTE_CURRENT_GAP_MA: f32 = (BRUTE_ANCHOR_CURRENT_MA * 5.) / 6.;
+const BRUTE_CURRENT_GAP_MA: f32 = BRUTE_ANCHOR_CURRENT_MA; 
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
 
@@ -59,7 +59,7 @@ const OPEN_CIRCUIT_VOLTS: f32 = 9.;
 const DENDRITE_CREEP_MA: f32 = 4.; 
 
 /// Exponential decay constant for decreasing current after bridge forms, Higher = faster decay
-const BRIDGE_CURRENT_DECAY: f64 = 0.1; 
+const BRIDGE_CURRENT_DECAY: f64 = 0.05; 
 
 
 /// Used to probe for electrolyte or carbon bridge conductivity
@@ -412,8 +412,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     new_drive_ma = BRUTE_ANCHOR_CURRENT_MA;
                 }
                 else {
-                    // slowly increase the drive current until we hit the desired gap
-                    new_drive_ma += MIN_DRIVE_CURRENT_INCR_MA;
+                    if state.ohms_rate_ewma > 0. {
+                        // slowly increase the drive current until we hit the desired gap
+                        new_drive_ma += 2.*MIN_DRIVE_CURRENT_INCR_MA;
+                    }
                 }
             }
         }
@@ -440,7 +442,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 // switch to bridge preservation
                 state.bridge_start_millis = now_millis - 500; // assumes 1 Hz refresh
                 state.drive_phase = DrivePhase::StabilizeBridge;
-                new_drive_ma = state.target_drive_ma * 0.95; // nudge down immediately in this mainloop iteration
+                new_drive_ma = state.target_drive_ma * 0.98; // nudge down immediately in this mainloop iteration
                 println!("{:?} end Growth phase with V {:.2} R {:.2} dR/dt {:.3}", 
                     now_utc_dt.timestamp(), state.measured_volts, state.inter_electrode_ohms, state.ohms_rate_ewma);
             }
