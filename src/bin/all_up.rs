@@ -34,13 +34,14 @@ const PROBE_INSERTED_TEMP_C:f32 = 600.;
 const ELECTROLYTE_TARGET_TEMP_C:f32 = 780.;
 
 /// If the electrodes were shorted together at room temperature, what resistance do we expect?
-const MIN_INTER_ELECTRODE_OHMS: f32 = 19.;
+const MIN_INTER_ELECTRODE_OHMS: f32 = 10.;
 
-/// The EWMA of dR/dt drops below this value when a dendrite forms
-const DENDRITE_OHM_RATE_CLIFF: f32 = -0.75;
+/// The EWMA of dR/dt drops below this value when a bridge forms
+const BRIDGE_OHM_RATE_CLIFF: f32 = -0.75;
 
-/// A guess at what a stable dendrite resistance would be when it approaches the anode
-const STABLE_DENDRITE_OHMS: f32 = 20.;
+/// A guess at what a stable bridge resistance would be when it approaches the anode
+const STABLE_BRIDGE_OHMS: f32 = 15.;
+
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
@@ -56,6 +57,11 @@ const OPEN_CIRCUIT_VOLTS: f32 = 9.;
 
 /// Used when dendrite has formed
 const DENDRITE_CREEP_MA: f32 = 4.; 
+
+/// Exponential decay constant for decreasing current after bridge forms, Higher = faster decay
+const BRIDGE_CURRENT_DECAY: f64 = 0.1; 
+
+
 /// Used to probe for electrolyte or carbon bridge conductivity
 const PROBE_CURRENT_MA: f32 = 1.;
 /// Used after we think we've achieved a solid carbon bridge 
@@ -151,12 +157,12 @@ enum DrivePhase {
     SlowRiseAnchoring = 1, 
     /// Force high current pulses to achieve anchoring quickly
     BruteAnchoring = 2,
-    /// Growth of carbon chains between electrodes
+    /// Growth of carbon dendrites from cathode to anode
     Growth = 3,
-    /// Stable dendrite growth?
-    Dendrite = 4, 
+    /// We've detected a dendrite bridge across the electrodes
+    StabilizeBridge = 4, 
     /// Monitor the inter-electrode conductivity
-    Cooldown = 5, 
+    MonitorBridge = 5, 
 } 
 
 /**
@@ -284,9 +290,10 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
 pub struct ElectrodeState {
     drive_phase: DrivePhase,
     last_update_millis: i64,
-    dendrite_start_millis: i64,
+    /// Time at which we detected bridge formation across electrodes
+    bridge_start_millis: i64,
     inter_electrode_ohms: f32,
-    /// Exponential moving average of the rate of change (dR/dt) of inter-electrode resistance
+    /// Exponential weighted moving average of the rate of change (dR/dt) of inter-electrode resistance
     ohms_rate_ewma: f32,
     target_drive_ma: f32,
     reported_drive_ma: f32,
@@ -300,14 +307,14 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
     ElectrodeState {
             drive_phase:DrivePhase::Warmup,
             last_update_millis:0,
-            dendrite_start_millis: 0,
+            bridge_start_millis: 0,
             inter_electrode_ohms:INF_INTER_ELECTRODE_OHMS,
             ohms_rate_ewma:0.,
             target_drive_ma:0.,
             reported_drive_ma:0.,
             measured_ma:0.,
             measured_volts:0., 
-            growth_ma: 40. 
+            growth_ma: BRUTE_ANCHOR_CURRENT_MA 
         }; 
 /**
  * Adjust the electrode current based on melt condition and drive phase
@@ -342,14 +349,14 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             INF_INTER_ELECTRODE_OHMS // absurdly large value based on previous experiments
         };
 
-    let mut dendrite_formed = false;
+    let mut bridge_formed = false;
     // Calculate dR/dt, EWMA of dR/dt, then look for drops of a large magnitude
     if inter_electrode_ohms != INF_INTER_ELECTRODE_OHMS {
         let delta_secs = ((now_millis - state.last_update_millis) as f32)/1000.;
         let dr_dt = (inter_electrode_ohms - state.inter_electrode_ohms)/delta_secs;
         update_ewma(&mut state.ohms_rate_ewma,dr_dt, RESISTANCE_EWMA_ALPHA);
-        if state.drive_phase == DrivePhase::Growth && state.ohms_rate_ewma <= DENDRITE_OHM_RATE_CLIFF {
-            dendrite_formed = true;
+        if state.drive_phase == DrivePhase::Growth && state.ohms_rate_ewma <= BRIDGE_OHM_RATE_CLIFF {
+            bridge_formed = true;
         }
     }
 
@@ -376,7 +383,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
             sleep(HOLD_ZERO_PULSE_TIME).await;
         }
-        default => {  } 
+        _ => {  } 
     }
 
     // Calculate any drive phase transitions
@@ -407,11 +414,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
         DrivePhase::SlowRiseAnchoring => { 
             if reported_gap > PLATEAU_CURRENT_GAP_MA {
-                // the actual current has diverged from desired current
+                // the actual current has diverged from the drive current, as expected
                 state.drive_phase = DrivePhase::Growth;
                 state.growth_ma = state.target_drive_ma;
                 state.ohms_rate_ewma = 0.; //reset because it's scrambled by prior descent
-                println!("{:?} end Anchoring phase with target {:.3} mA vs reported {:.3} mA", 
+                println!("{:?} end SlowRiseAnchoring phase with target {:.3} mA vs reported {:.3} mA", 
                     now_utc_dt.timestamp(), state.target_drive_ma, state.reported_drive_ma);
             }
             else if reported_gap > 1.0 {
@@ -424,26 +431,35 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Growth => {  
-            if dendrite_formed {
-                // switch to dendrite preservation
-                state.dendrite_start_millis = now_millis;
-                state.drive_phase = DrivePhase::Dendrite;
+            if bridge_formed {
+                // switch to bridge preservation
+                state.bridge_start_millis = now_millis - 500; // assumes 1 Hz refresh
+                state.drive_phase = DrivePhase::StabilizeBridge;
+                new_drive_ma = state.target_drive_ma * 0.95; // nudge down immediately in this mainloop iteration
                 println!("{:?} end Growth phase with V {:.2} R {:.2} dR/dt {:.3}", 
                     now_utc_dt.timestamp(), state.measured_volts, state.inter_electrode_ohms, state.ohms_rate_ewma);
             }
+            else {
+                // maintain the steady growth current
+                new_drive_ma = state.growth_ma;
+            }
         }
-        DrivePhase::Dendrite => {
-            if state.inter_electrode_ohms < MIN_INTER_ELECTRODE_OHMS  {
-                // inter-electrode resistance is close to zero, indicating that the electrode-electrode gap has been bridged
-                state.drive_phase = DrivePhase::Cooldown;
-                println!("{:?} end Dendrite phase with V {:.2} R {:.2} dR/dt {:.3}", 
-                    now_utc_dt.timestamp(), state.measured_volts, state.inter_electrode_ohms, state.ohms_rate_ewma);
+        DrivePhase::StabilizeBridge => {
+            if state.measured_ma >  PROBE_CURRENT_MA {
+                // exponential decay of current after bridge has formed
+                let elapsed_ms = now_millis - state.bridge_start_millis;
+                let elapsed_secs:f64 = (elapsed_ms as f64) / 1000.;
+                new_drive_ma = ((state.growth_ma as f64) * (-BRIDGE_CURRENT_DECAY * elapsed_secs).exp()) as f32;
             }
             else {
-                new_drive_ma = DENDRITE_CREEP_MA;
+                // switch to maintenance mode
+                state.drive_phase = DrivePhase::MonitorBridge;
+                new_drive_ma = COOLDOWN_PROBE_CURRENT_MA;
+                println!("{:?} end StabilizeBridge phase with V {:.2} R {:.2} I {:.3}", 
+                    now_utc_dt.timestamp(), state.measured_volts, state.inter_electrode_ohms, state.measured_ma);
             }
         }
-        DrivePhase::Cooldown => {
+        DrivePhase::MonitorBridge => {
             new_drive_ma = COOLDOWN_PROBE_CURRENT_MA;
         }
         _ => {
@@ -504,7 +520,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         control_furnace(&mut ctx, &mut furnace_state).await?;
         if furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C  ||
-            electrode_state.drive_phase == DrivePhase::Cooldown 
+            electrode_state.drive_phase == DrivePhase::MonitorBridge 
         {
             control_electrodes(&mut ctx, &mut electrode_state).await?;
         }
