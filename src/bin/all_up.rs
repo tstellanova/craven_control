@@ -51,7 +51,7 @@ const SMALL_SEP_ANCHOR_CURRENT_MA: f32 = 25.;
 /// Brute force anchoring overcurrent (based on measured values for small gaps)
 const BRUTE_ANCHOR_CURRENT_MA: f32 = 2. * SMALL_SEP_ANCHOR_CURRENT_MA; 
 /// Brute force anchoring expected current gap
-const BRUTE_CURRENT_GAP_MA: f32 = (BRUTE_ANCHOR_CURRENT_MA - SMALL_SEP_ANCHOR_CURRENT_MA);
+const BRUTE_CURRENT_GAP_MA: f32 = (BRUTE_ANCHOR_CURRENT_MA * 5.) / 6.;
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
 
@@ -377,7 +377,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     match state.drive_phase {
         DrivePhase::BruteAnchoring | DrivePhase::SlowRiseAnchoring | DrivePhase::Growth => {
             let sleep_reported_ma = set_electrode_current_drive(ctx, 0.).await?;
-            if sleep_reported_ma != 0. {
+            if sleep_reported_ma > 0.1 {
                 println!("{:?} sleep_reported_ma: {:.2} ",
                     now_utc_dt.timestamp(), sleep_reported_ma);
             }
@@ -408,8 +408,13 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     now_utc_dt.timestamp(), state.target_drive_ma, state.reported_drive_ma);
             }
             else {
-                // slowly increase the drive current until we hit the desired gap
-                new_drive_ma += MIN_DRIVE_CURRENT_INCR_MA;
+                if state.target_drive_ma <  BRUTE_ANCHOR_CURRENT_MA {
+                    new_drive_ma = BRUTE_ANCHOR_CURRENT_MA;
+                }
+                else {
+                    // slowly increase the drive current until we hit the desired gap
+                    new_drive_ma += MIN_DRIVE_CURRENT_INCR_MA;
+                }
             }
         }
         DrivePhase::SlowRiseAnchoring => { 
