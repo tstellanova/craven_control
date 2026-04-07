@@ -14,27 +14,35 @@ use craven_control::*;
 
 
 
+async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32, reg_node_id: u16, old_node_id: u8, new_node_id: u8) 
+    -> Result<(), Box<dyn std::error::Error>>
+{
+     set_one_modbus_node_id_ext(tty_path, baud_rate, reg_node_id, old_node_id, new_node_id, true, true).await
+}
 
 
-async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32,  reg_node_id: u16, old_node_id: u8, new_node_id: u8) 
+async fn set_one_modbus_node_id_ext(tty_path: &str, baud_rate: u32, reg_node_id: u16, old_node_id: u8, new_node_id: u8, read_first: bool, verify_last: bool) 
     -> Result<(), Box<dyn std::error::Error>>
 {
     let builder = tokio_serial::new(tty_path, baud_rate);
     let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(old_node_id));
+    let mut existing_node_id = 255;
 
-    println!("Read existing node ID from node {old_node_id:X?}, reg 0x{reg_node_id:X?} ... ");
-    let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
-    println!("> read_rsp: {:?}", read_rsp);
+    if read_first {
+        println!("Read existing node ID from node {old_node_id:X?}, reg 0x{reg_node_id:X?} ... ");
+        let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
+        println!("> read_rsp: {:?}", read_rsp);
 
-    let existing_node_id = read_rsp[0] as u8;
-    if existing_node_id != old_node_id {
-        if existing_node_id != new_node_id {
-            println!("Node ID {old_node_id:X?} reports node ID of {existing_node_id:X?}");
-            //TODO ? 
-            //panic!("Couldn't verify the old node ID");
-        }
-        else {
-            println!("existing_node_id == new_node_id... done");
+        existing_node_id = read_rsp[0] as u8;
+        if existing_node_id != old_node_id {
+            if existing_node_id != new_node_id {
+                println!("Node ID {old_node_id:X?} reports node ID of {existing_node_id:X?}");
+                //TODO ? 
+                //panic!("Couldn't verify the old node ID");
+            }
+            else {
+                println!("existing_node_id == new_node_id... done");
+            }
         }
     }
  
@@ -57,22 +65,26 @@ async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32,  reg_node_id: u1
     //Wait for device to reset, if necessary
     sleep(Duration::from_millis(1000)).await;
 
-    println!("Connecting to new node id: {new_node_id:X?}");
-    // let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(new_node_id));
-    ctx.set_slave(Slave(new_node_id));
-    let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
-    println!("> read_rsp: {:?}", read_rsp);
-    let latest_node_id = read_rsp[0] as u8;
-    if latest_node_id != new_node_id {
-        eprintln!("latest_node_id {latest_node_id:X?} != {new_node_id:X?}");
-    }
+    if verify_last {
 
-    if new_node_id == NODEID_YKPVCCS010_CURR_SRC {
-        // flush the configuration parameter change to the node's persistent storage 
-        println!("persisting node configuration");
-        let flush_resp = ctx.write_single_register(REG_SAVE_CFG_YKPVCCS010_CURR_SRC, 1).await?;
-        if flush_resp.is_err() {
-            eprintln!("> flush_resp: {:?}", flush_resp);
+
+        println!("Connecting to new node id: {new_node_id:X?}");
+        // let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(new_node_id));
+        ctx.set_slave(Slave(new_node_id));
+        let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
+        println!("> read_rsp: {:?}", read_rsp);
+        let latest_node_id = read_rsp[0] as u8;
+        if latest_node_id != new_node_id {
+            eprintln!("latest_node_id {latest_node_id:X?} != {new_node_id:X?}");
+        }
+
+        if new_node_id == NODEID_YKPVCCS010_CURR_SRC {
+            // flush the configuration parameter change to the node's persistent storage 
+            println!("persisting node configuration");
+            let flush_resp = ctx.write_single_register(REG_SAVE_CFG_YKPVCCS010_CURR_SRC, 1).await?;
+            if flush_resp.is_err() {
+                eprintln!("> flush_resp: {:?}", flush_resp);
+            }
         }
     }
 
@@ -105,7 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA8TAI_IV_ADC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA26419_8CH_DAC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_R4DVI04, NODEID_DEFAULT, NODEID_R4DVI04_QRELAY_ADC).await?;
-    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WDCU3003M, NODEID_BROADCAST_0, NODEID_WDCU3003M_IV_ADC).await?;
+    set_one_modbus_node_id_ext(tty_path, baud_rate, REG_NODEID_WDCU3003M, NODEID_BROADCAST_0, NODEID_WDCU3003M_IV_ADC, false, false).await?;
 
 
     Ok(())

@@ -63,9 +63,9 @@ fn two_registers_to_f32(registers: &[u16], offset: usize) -> f32 {
     let high = registers[offset] as u32;
     let low = registers[offset + 1] as u32;
     let combined = (high << 16) | low;
-    
-    // Convert u32 to f32
-    f32::from_bits(combined)
+    let converted = combined as f32;
+    // println!("combined: {} converted: {:.3}",combined,converted);
+    converted
 }
 
 /// Combine two u16 registers into an i32
@@ -223,8 +223,8 @@ pub async fn read_wdcu3003m_iv(ctx: &mut tokio_modbus::client::Context)
     let resp: Vec<u16> = ctx.read_input_registers(0x0000, 3).await??; //read all at once
     println!("wdcu3003m resp: {resp:?}");
     let volts = (resp[0] as f32) / 1E3;
-    // TODO verify that we need to convert microamps to milliamps?
-    let milliamps = two_registers_to_f32(&resp, 1) * 1E3;
+    // raw value is in microamps -- convert to milliamps
+    let milliamps = two_registers_to_f32(&resp, 1) / 1E3;
 
     Ok((volts, milliamps))
 }
