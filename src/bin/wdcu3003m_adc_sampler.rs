@@ -25,6 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ping_one_modbus_node_id(&mut ctx, NODEID_WDCU3003M_IV_ADC, 0x00).await?;
     poll_one_modbus_register(&mut ctx, NODEID_WDCU3003M_IV_ADC, 0x00).await?;
 
+    // 9 Volt source with 1 kOhm load should give 9 mA current
     for i in 0..10 {
         sleep(Duration::from_millis(1000)).await;
         let (volts, milliamps) = read_wdcu3003m_iv(&mut ctx).await?;
