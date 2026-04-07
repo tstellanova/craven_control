@@ -24,6 +24,7 @@ pub const NODEID_BROADCAST_0: u8 = 0x00;
 pub const NODEID_DEFAULT: u8 = 0x01; // The Modbus node ID that most devices default to
 pub const NODEID_N4VIA02_IV_ADC: u8 = 0x1A; 
 pub const NODEID_WA8TAI_IV_ADC: u8 = 0x1B; // Waveshare WA8TAI 8CH IV ADC
+pub const NODEID_WDCU3003M_IV_ADC: u8 = 0x1C; // Microammeter 3A/30V display IV ADC
 pub const NODEID_N4AIA04_IV_ADC: u8 = 0x1E;
 pub const NODEID_YKDAQ1402_IV_ADC: u8 = 0x1F;
 pub const NODEID_YKPVCCS010_CURR_SRC: u8 = 0x2F;
@@ -52,19 +53,23 @@ pub const REG_YKKTC1202_TEMP_VALS: u16 = 0x00; // The dual RTK's temperature val
 pub const REG_YKKTC1202_VALIDITY: u16 = 0x10; // The dual RTK's thermocouple connection state
 pub const REG_N4AIA04_CH1_CURR: u16 = 0x0002;
 pub const REG_NODEID_R4DVI04: u16 = 0x00FD;
+pub const REG_NODEID_WDCU3003M: u16 = 0x0000;
 
-// /// Combine two u16 registers into amn f32
-// fn registers_to_f32(registers: &[u16], offset: usize) -> f32 {
-//     let high = registers[offset] as u32;
-//     let low = registers[offset + 1] as u32;
-//     let combined = (high << 16) | low;
+pub type MilliampsF32 = f32;
+pub type VoltF32 = f32;
+
+/// Combine two u16 registers into a single f32
+fn two_registers_to_f32(registers: &[u16], offset: usize) -> f32 {
+    let high = registers[offset] as u32;
+    let low = registers[offset + 1] as u32;
+    let combined = (high << 16) | low;
     
-//     // Convert u32 to f32
-//     f32::from_bits(combined)
-// }
+    // Convert u32 to f32
+    f32::from_bits(combined)
+}
 
 /// Combine two u16 registers into an i32
-pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
+pub fn two_registers_to_i32(registers: &[u16], offset: usize) -> i32 {
     let high = registers[offset] as i32;
     let low = registers[offset + 1] as i32;
     let combined = (high << 16) | low;
@@ -92,6 +97,27 @@ pub async fn ping_one_modbus_node_id(ctx: &mut tokio_modbus::client::Context, no
 }
 
 /**
+ * Try to read one register from a node on the bus.
+ */
+pub async fn poll_one_modbus_register(ctx: &mut tokio_modbus::client::Context, 
+    node_id: u8,  register: u16) 
+    -> Result<(), Box<dyn std::error::Error>>
+{
+    println!("Read register {register:X?} from node ID {node_id:X?} ... ");
+    ctx.set_slave(Slave(node_id));
+    let read_rsp: Vec<u16> =  ctx.read_holding_registers(register, 1).await??;
+    println!("> read_rsp: {:?}", read_rsp);
+
+    // let existing_node_id = read_rsp[0] as u8;
+    // if existing_node_id != node_id {
+    //     println!("Node ID {node_id:X?} reports node ID of {existing_node_id:X?}");
+    //     panic!("Couldn't verify the old node ID");
+    // }
+
+    Ok(())
+}
+
+/**
  * Read the voltage and current at active electrode pair.
  * 
  */
@@ -103,9 +129,9 @@ pub async fn read_ykdaq1402_iv_adc(ctx: &mut tokio_modbus::client::Context)
     // println!(" YKDAQ1402 CFG ({REG_NODEID_YKDAQ1402_IV_ADC:?})[3]: {read_rsp:?}");
     let iv_adc_vals: Vec<u16> = ctx.read_holding_registers(REG_IV_ADC_2CH_VALS, 4).await??;
     println!(" YKDAQ1402 VALS ({REG_IV_ADC_2CH_VALS:?})[4]: {iv_adc_vals:?}");
-    let ch1_value = registers_to_i32(&iv_adc_vals, 0);
+    let ch1_value = two_registers_to_i32(&iv_adc_vals, 0);
     let verified_volts = (ch1_value as f32) / 10000.0; // resolution is 0.1 mV for 10V range
-    let ch2_value = registers_to_i32(&iv_adc_vals, 2);
+    let ch2_value = two_registers_to_i32(&iv_adc_vals, 2);
     let verified_milliamps: f32 = (ch2_value as f32)/ 10.0; // resolution is 0.1 mA for 5A range
 
     println!(" YKDAQ1402 ch1_value: {ch1_value:?} = {verified_volts:?} V");
@@ -183,7 +209,25 @@ pub async fn read_n4aia04_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
     Ok((0f32, ch1_milliamps))
 }
 
+/**
+ * Read WDCU3003M analog IV ADC (which is also a display)
+ */
+pub async fn read_wdcu3003m_iv(ctx: &mut tokio_modbus::client::Context)
+-> Result<(VoltF32, MilliampsF32), Box<dyn std::error::Error>> 
+{
+    // 0x0000: Measure voltage 
+    // 0x0001: Measure current (high 16 bits) 
+    // 0x0002: Measure current (low 16 bits) 
 
+    ctx.set_slave(Slave(NODEID_WDCU3003M_IV_ADC)); 
+    let resp: Vec<u16> = ctx.read_input_registers(0x0000, 3).await??; //read all at once
+    println!("wdcu3003m resp: {resp:?}");
+    let volts = (resp[0] as f32) / 1E3;
+    // TODO scale milliamps?
+    let milliamps = two_registers_to_f32(&resp, 1);
+
+    Ok((volts, milliamps))
+}
 
 /**
  * Read Waveshare WA8TAI 8CH analog IV ADC.

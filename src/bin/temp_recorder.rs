@@ -97,9 +97,9 @@ async fn read_precision_iv_adc(ctx: &mut tokio_modbus::client::Context)
     // println!(" YKDAQ1402 CFG ({REG_NODEID_YKDAQ1402_IV_ADC:?})[3]: {read_rsp:?}");
     let iv_adc_vals: Vec<u16> = ctx.read_holding_registers(REG_IV_ADC_2CH_VALS, 4).await??;
     // println!(" YKDAQ1402 VALS ({REG_IV_ADC_2CH_VALS:?})[4]: {iv_adc_vals:?}");
-    let ch1_value = registers_to_i32(&iv_adc_vals, 0);
+    let ch1_value = two_registers_to_i32(&iv_adc_vals, 0);
     let verified_volts = (ch1_value as f32) / 10000.0; // resolution is 0.1 mV for 10V range
-    let ch2_value = registers_to_i32(&iv_adc_vals, 2);
+    let ch2_value = two_registers_to_i32(&iv_adc_vals, 2);
     let verified_milliamps = (ch2_value as f32)/ 10.0; // resolution is 0.1 mA for 5A range
 
     // println!(" YKDAQ1402 ch1_value: {ch1_value:?} = {verified_volts:?} V");

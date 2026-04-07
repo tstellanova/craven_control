@@ -97,7 +97,7 @@ async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
  * 
  */
 async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
--> Result<(f32, f32), Box<dyn std::error::Error>> 
+-> Result<(VoltF32, MilliampsF32), Box<dyn std::error::Error>> 
 {
     sleep(Duration::from_millis(100)).await;
 //    read_ykdaq1402_iv_adc(ctx).await

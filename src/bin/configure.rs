@@ -22,11 +22,6 @@ async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32,  reg_node_id: u1
     let builder = tokio_serial::new(tty_path, baud_rate);
     let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(old_node_id));
 
-    // read a block
-    // println!("Read a block from 0x00 register  ");
-    // let block_resp: Vec<u16> = ctx.read_holding_registers(0x00, 8).await??;
-    // println!("> block_resp 0x00: {:?}", block_resp);
-
     println!("Read existing node ID from node {old_node_id:X?}, reg 0x{reg_node_id:X?} ... ");
     let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
     println!("> read_rsp: {:?}", read_rsp);
@@ -35,7 +30,7 @@ async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32,  reg_node_id: u1
     if existing_node_id != old_node_id {
         if existing_node_id != new_node_id {
             println!("Node ID {old_node_id:X?} reports node ID of {existing_node_id:X?}");
-            //TODO ? ctx.set_slave(Slave(existing_node_id));
+            //TODO ? 
             //panic!("Couldn't verify the old node ID");
         }
         else {
@@ -58,21 +53,18 @@ async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32,  reg_node_id: u1
             }
         }
     }
-
-    // println!("Disconnecting from old node id: {old_node_id:?}");
-    // ctx.disconnect().await?;
     
     //Wait for device to reset, if necessary
     sleep(Duration::from_millis(1000)).await;
 
-    println!("Connecting to new node id: {new_node_id:?}");
+    println!("Connecting to new node id: {new_node_id:X?}");
     // let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(new_node_id));
     ctx.set_slave(Slave(new_node_id));
     let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
     println!("> read_rsp: {:?}", read_rsp);
     let latest_node_id = read_rsp[0] as u8;
     if latest_node_id != new_node_id {
-        eprintln!("latest_node_id {latest_node_id:?} != {new_node_id:?}");
+        eprintln!("latest_node_id {latest_node_id:X?} != {new_node_id:X?}");
     }
 
     if new_node_id == NODEID_YKPVCCS010_CURR_SRC {
@@ -83,12 +75,8 @@ async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32,  reg_node_id: u1
             eprintln!("> flush_resp: {:?}", flush_resp);
         }
     }
-    // else {
-    //     let read_rsp: Vec<u16> = ctx.read_holding_registers(0x00, 16).await??;
-    //     println!("> read_rsp: {:?}", read_rsp);
-    // }
 
-    println!("Disconnecting from new node id: {new_node_id:?}");
+    println!("Disconnecting from new node id: {new_node_id:X?}");
     ctx.disconnect().await?;
 
     Ok(())
@@ -104,7 +92,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tty_path = "/dev/cu.usbserial-BG02SI88";
     let baud_rate = 9600;
 
-
     // Examples of setting the Modbus node ID for various devices -- need only be done once
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_YKDAQ1402_IV_ADC, NODEID_DEFAULT, NODEID_YKDAQ1402_IV_ADC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PREC_CURR, NODEID_DEFAULT, NODEID_PREC_CURR_SRC).await?;
@@ -117,22 +104,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4IOA01, NODEID_DEFAULT, NODEID_N4IOA01_CURR_GEN).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA8TAI_IV_ADC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA26419_8CH_DAC).await?;
-    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_R4DVI04, NODEID_DEFAULT, NODEID_R4DVI04_QRELAY_ADC).await?;
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_R4DVI04, NODEID_DEFAULT, NODEID_R4DVI04_QRELAY_ADC).await?;
+    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WDCU3003M, NODEID_BROADCAST_0, NODEID_WDCU3003M_IV_ADC).await?;
 
-    //
-
-    // let builder = tokio_serial::new(tty_path, baud_rate);
-    // let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
-
-    // cofigure channel 1-8 input modes for WA8TAI_IV_AD: Even channels are current, odd channels are voltage
-    // configure_wa8tai_mixed_adc_modes(&mut ctx).await?;
-
-    // let ma = read_wa8tai_iv(&mut ctx, 2).await?;
-    // println!("test milliamp value: {ma:?}");
-
-    // configure_wa26419(&mut ctx).await?;
-
-    // ctx.disconnect().await?;
 
     Ok(())
 }
