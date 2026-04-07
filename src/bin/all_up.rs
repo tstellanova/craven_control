@@ -22,7 +22,7 @@ use craven_control::*;
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
 const MODBUS_RW_DELAY: Duration = Duration::from_millis(25);
 const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
-const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(100);
+const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(75);
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
