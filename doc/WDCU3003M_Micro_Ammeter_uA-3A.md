@@ -7,19 +7,24 @@ Register Description:
 0x0002: Measure current (low 16 bits)   
 0x0003: Measure power  
 0x0004: Set the power-on screen (1: Yes 0: None)   
-0x0005: Set the lower limit of the voltage alarm (value is 0: off)   
-0x0006: Set the upper limit of the voltage alarm (value is 0: off)   
-0x0007: 16 bits lower limit   
-0x0008: low 16 bits Set the lower limit of the current alarm (value is 0: off)   
-0x0009: 16 bits high upper limit   
-0x000A: low 16 bits Set the current alarm upper limit (value is 0: value is 0: off)   
-0x000B: internal use default 1   
-0x000C: internal use default   
-0x000D: internal use default   
-0x000E: Set the shielding voltage  
-0x000F: Set the shielding current 16-bit high   
-0x0010: Set the shielding current 16-bit low   
+0x0005: Set the lower limit of the voltage alarm (value is 0: off)	5000
+0x0006: Set the upper limit of the voltage alarm (value is 0: off)	24000
+0x0007: 16 bits lower limit   0
+0x0008: low 16 bits Set the lower limit of the current alarm (value is 0: off)    1000
+0x0009: 16 bits high upper limit   45
+0x000A: low 16 bits Set the current alarm upper limit (value is 0: value is 0: off)   50880
+0x000B: internal use default 1   (1)
+0x000C: internal use default   (0)
+0x000D: internal use default   (0)
+0x000E: Set the shielding voltage  (30500)
+0x000F: Set the shielding current 16-bit high   (45)
+0x0010: Set the shielding current 16-bit low   (50980)
 0x0011: Set the alarm in the area or out of the area (the value is 0: out of the area, the value is 1: in the area)
+
+[12070, 0, 3271, 39, 1, 5000, 4000, 	0, 1000, 0, 0, 1, 0, 0, 500, 0, 100, 0, 2, 0]
+[12073, 0, 3271, 39, 1, 5000, 24000, 	0, 1000, 45, 50880, 1, 0, 0, 30500, 45, 50980, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+[5, 0, 2, 0, 1, 5000, 4000, 0, 1000, 0, 0, 1, 0, 0, 500, 0, 100, 0, 0, 0]
+[22959, 0, 3271, 75, 1, 0, 24000, 0, 0, 45, 50880, 1, 0, 0, 500, 0, 100, 0, 0, 0]
 
 串口参数：  
 波特率：4800, 9600, 19200, 38400, 57600,115200　　默认是9600　  
@@ -109,6 +114,8 @@ Return: device station number command address data CRC verification
 
 Set up multiple registers: 16  
 **设置多个寄存器：16**  
+Computer transmission: device station number command start address N registers number of bytes data CRC verification 
+return: device station number command start address N registers CRC verification
 **计算机发送：** 设备站号  命令   开始地址       N个寄存器     字节数  　数据   CRC校验  
 **返回：** 设备站号  命令   开始地址       N个寄存器    CRC校验
 

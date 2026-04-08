@@ -22,59 +22,57 @@ use craven_control::*;
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
 const MODBUS_RW_DELAY: Duration = Duration::from_millis(25);
 const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
-const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(75);
+const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(100);
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
-const MAX_PROBE_TEMP_C:f32 = 1000.;
+const MAX_PROBE_TEMP_C:CelsiusF32 = 1000.;
 /// Temp at which we attempt to submerge thermo probes in electrolyte melt
-const PROBE_CHECK_TEMP_C:f32 = 550.; 
+const PROBE_CHECK_TEMP_C:CelsiusF32 = 550.; 
 /// Temp we expect to see when probe is succesfully inserted into melt
-const PROBE_INSERTED_TEMP_C:f32 = 600.;
+const PROBE_INSERTED_TEMP_C:CelsiusF32 = 600.;
 /// The center temperature we are trying to achieve for the electrolyte melt
-const ELECTROLYTE_TARGET_TEMP_C:f32 = 780.;
+const ELECTROLYTE_TARGET_TEMP_C:CelsiusF32 = 780.;
 
 /// If the electrodes were shorted together at room temperature, what resistance do we expect?
-const MIN_INTER_ELECTRODE_OHMS: f32 = 10.;
-
+const MIN_INTER_ELECTRODE_OHMS: OhmsF32 = 10.;
 /// The EWMA of dR/dt drops below this value when a bridge forms
 const BRIDGE_OHM_RATE_CLIFF: f32 = -0.75;
-
 /// A guess at what a stable bridge resistance would be when it approaches the anode
-const STABLE_BRIDGE_OHMS: f32 = 15.;
-
+const STABLE_BRIDGE_OHMS: OhmsF32 = 15.;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
-const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
+const INF_INTER_ELECTRODE_OHMS: OhmsF32 = 666E2;
+
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
-const PLATEAU_CURRENT_GAP_MA: f32 = 6.0;
+const PLATEAU_CURRENT_GAP_MA: MilliampsF32 = 6.0;
 /// Measured anchoring current for small (~1 mm) electrode separation
-const SMALL_SEP_ANCHOR_CURRENT_MA: f32 = 25.;
+const SMALL_SEP_ANCHOR_CURRENT_MA: MilliampsF32 = 25.;
 /// Brute force anchoring overcurrent (based on measured values for small gaps)
-const BRUTE_ANCHOR_CURRENT_MA: f32 = 2. * SMALL_SEP_ANCHOR_CURRENT_MA; 
+const BRUTE_ANCHOR_CURRENT_MA: MilliampsF32 = 40.; 
 /// Brute force anchoring expected current gap
-const BRUTE_CURRENT_GAP_MA: f32 = BRUTE_ANCHOR_CURRENT_MA; 
+const BRUTE_CURRENT_GAP_MA: MilliampsF32 = BRUTE_ANCHOR_CURRENT_MA; 
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
-const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
+const OPEN_CIRCUIT_VOLTS: VoltsF32 = 9.; 
 
 /// Used when dendrite has formed
-const DENDRITE_CREEP_MA: f32 = 4.; 
+const DENDRITE_CREEP_MA: MilliampsF32 = 4.; 
 
 /// Exponential decay constant for decreasing current after bridge forms, Higher = faster decay
-const BRIDGE_CURRENT_DECAY: f64 = 0.05; 
+const BRIDGE_CURRENT_DECAY: f64 = 0.02; 
 
 
 /// Used to probe for electrolyte or carbon bridge conductivity
-const PROBE_CURRENT_MA: f32 = 1.;
+const PROBE_CURRENT_MA: MilliampsF32 = 1.;
 /// Used after we think we've achieved a solid carbon bridge 
-const COOLDOWN_PROBE_CURRENT_MA: f32 = 0.5;
+const COOLDOWN_PROBE_CURRENT_MA: MilliampsF32 = 0.5;
 /// The minimum increment for drive current, as specified in the current source docs
-const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
+const MIN_DRIVE_CURRENT_INCR_MA: MilliampsF32 = 0.1;
 /// The range of the ammeter
-const MAX_AMMETER_VAL: f32 = 20.0;
+const MAX_AMMETER_VAL: MilliampsF32 = 20.0;
 
 
 
 /// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
-const RESISTANCE_EWMA_ALPHA: f32 = 0.15;
+const RESISTANCE_EWMA_ALPHA: f32 = 0.1;
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -97,7 +95,7 @@ async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
  * 
  */
 async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
--> Result<(VoltF32, MilliampsF32), Box<dyn std::error::Error>> 
+-> Result<(VoltsF32, MilliampsF32), Box<dyn std::error::Error>> 
 {
     sleep(Duration::from_millis(100)).await;
 //    read_ykdaq1402_iv_adc(ctx).await
@@ -453,10 +451,12 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
         DrivePhase::StabilizeBridge => {
             if state.measured_ma >  PROBE_CURRENT_MA {
-                // exponential decay of current after bridge has formed
-                let elapsed_ms = now_millis - state.bridge_start_millis;
-                let elapsed_secs:f64 = (elapsed_ms as f64) / 1000.;
-                new_drive_ma = ((state.growth_ma as f64) * (-BRIDGE_CURRENT_DECAY * elapsed_secs).exp()) as f32;
+                if state.ohms_rate_ewma < -1. {
+                    // exponential decay of current after bridge has formed
+                    let elapsed_ms = now_millis - state.bridge_start_millis;
+                    let elapsed_secs:f64 = (elapsed_ms as f64) / 1000.;
+                    new_drive_ma = ((state.growth_ma as f64) * (-BRIDGE_CURRENT_DECAY * elapsed_secs).exp()) as f32;
+                }
             }
             else {
                 // switch to maintenance mode

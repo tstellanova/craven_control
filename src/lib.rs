@@ -56,7 +56,9 @@ pub const REG_NODEID_R4DVI04: u16 = 0x00FD;
 pub const REG_NODEID_WDCU3003M: u16 = 0x0000;
 
 pub type MilliampsF32 = f32;
-pub type VoltF32 = f32;
+pub type VoltsF32 = f32;
+pub type OhmsF32 = f32;
+pub type CelsiusF32 = f32;
 
 /// Combine two u16 registers into a single f32
 fn two_registers_to_f32(registers: &[u16], offset: usize) -> f32 {
@@ -213,7 +215,7 @@ pub async fn read_n4aia04_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
  * Read WDCU3003M analog IV ADC (which is also a display)
  */
 pub async fn read_wdcu3003m_iv(ctx: &mut tokio_modbus::client::Context)
--> Result<(VoltF32, MilliampsF32), Box<dyn std::error::Error>> 
+-> Result<(VoltsF32, MilliampsF32), Box<dyn std::error::Error>> 
 {
     // 0x0000: Measure voltage 
     // 0x0001: Measure current (high 16 bits) 
