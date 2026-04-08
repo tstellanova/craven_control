@@ -20,9 +20,7 @@ use craven_control::*;
 
 
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
-const MODBUS_RW_DELAY: Duration = Duration::from_millis(25);
-const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
-const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(100);
+const MODBUS_RW_DELAY: Duration = Duration::from_millis(125);
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:CelsiusF32 = 1000.;
@@ -105,7 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{} start heating", base_heating_utc_dt.timestamp());
 
     let mut heat_on = true;
-    toggle_furnace(&mut ctx, heat_on);
+    toggle_furnace(&mut ctx, heat_on).await?;
 
     const MOLTEN_FROM_COLD_TIME_MINUTES: i64 = 15;
     const COOLDOWN_TIME_SECS: i64 = 60;
@@ -137,10 +135,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     heat_cycle_start_dt = current_utc_dt;
                 }
             }
-            toggle_furnace(&mut ctx, heat_on);
         }
 
-        println!("{} {} {:.2} furnace heating: {}",current_utc_dt.timestamp(), base_delta_dt.num_minutes(), cycle_delta_dt.as_seconds_f32(), heat_on );
+        toggle_furnace(&mut ctx, heat_on).await?;
+
+        println!("{} {} {:.1} furnace heating: {}",current_utc_dt.timestamp(), base_delta_dt.num_seconds(), cycle_delta_dt.as_seconds_f32(), heat_on );
 
         // sync to about 1 Hz loops
         sleep_until(next_run_instant).await;
