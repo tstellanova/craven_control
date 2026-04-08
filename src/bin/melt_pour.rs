@@ -107,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     const MOLTEN_FROM_COLD_TIME_MINUTES: i64 = 15;
     const COOLDOWN_TIME_SECS: i64 = 60;
-    const HEAT_MAINT_TIME_SECS: i64 = COOLDOWN_TIME_SECS * 4;
+    const HEAT_MAINT_TIME_SECS: i64 = COOLDOWN_TIME_SECS * 2;
 
     while running.load(Ordering::SeqCst) { 
         let current_instant = tokio::time::Instant::now();
