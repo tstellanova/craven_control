@@ -22,7 +22,7 @@ use craven_control::*;
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
 const MODBUS_RW_DELAY: Duration = Duration::from_millis(25);
 const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
-const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(100);
+const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(50);
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:CelsiusF32 = 1000.;
@@ -47,7 +47,7 @@ const PLATEAU_CURRENT_GAP_MA: MilliampsF32 = 6.0;
 /// Measured anchoring current for small (~1 mm) electrode separation
 const SMALL_SEP_ANCHOR_CURRENT_MA: MilliampsF32 = 25.;
 /// Brute force anchoring overcurrent (based on measured values for small gaps)
-const BRUTE_ANCHOR_CURRENT_MA: MilliampsF32 = 40.; 
+const BRUTE_ANCHOR_CURRENT_MA: MilliampsF32 = 30.; 
 /// Brute force anchoring expected current gap
 const BRUTE_CURRENT_GAP_MA: MilliampsF32 = BRUTE_ANCHOR_CURRENT_MA; 
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
@@ -319,6 +319,7 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
  */
 async fn control_electrodes(ctx: &mut tokio_modbus::client::Context, 
     state: &mut ElectrodeState,
+    furnace_state: &FurnaceState
 ) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
@@ -390,14 +391,15 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             new_drive_ma = PROBE_CURRENT_MA;
             if current_gap < 0.2 {
                 // the measured current is about the same as probe current
-                state.drive_phase = DrivePhase::BruteAnchoring;
-                new_drive_ma = BRUTE_ANCHOR_CURRENT_MA;
+                state.drive_phase = DrivePhase::SlowRiseAnchoring;
+                // new_drive_ma = BRUTE_ANCHOR_CURRENT_MA;
                 println!("{:?} start BruteAnchoring drive with {:.2} mA", 
                     now_utc_dt.timestamp(), new_drive_ma);
             }
         }
         DrivePhase::BruteAnchoring => {
-            if reported_gap > BRUTE_CURRENT_GAP_MA {
+            if state.ohms_rate_ewma > 0.01 && !furnace_state.heater_on { 
+            // if reported_gap > BRUTE_CURRENT_GAP_MA {
                 // the actual current has diverged from the drive current, as expected
                 state.drive_phase = DrivePhase::Growth;
                 state.growth_ma = state.target_drive_ma;
@@ -410,8 +412,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     new_drive_ma = BRUTE_ANCHOR_CURRENT_MA;
                 }
                 else {
-                    if state.ohms_rate_ewma > 0. {
-                        // slowly increase the drive current until we hit the desired gap
+                    if state.ohms_rate_ewma <= -MIN_DRIVE_CURRENT_INCR_MA {
+                        // slowly increase drive current until we reach desired gap
                         new_drive_ma += 2.*MIN_DRIVE_CURRENT_INCR_MA;
                     }
                 }
@@ -529,7 +531,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C  ||
             electrode_state.drive_phase == DrivePhase::MonitorBridge 
         {
-            control_electrodes(&mut ctx, &mut electrode_state).await?;
+            control_electrodes(&mut ctx, &mut electrode_state, &furnace_state).await?;
         }
         else {
             electrode_state = INITIAL_ELECTRODE_STATE;
