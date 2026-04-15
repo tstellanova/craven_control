@@ -23,6 +23,11 @@ const MODBUS_RW_DELAY: Duration = Duration::from_millis(25);
 const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
 const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(50);
 
+/// Average duration of a typical heat/cool cycle after warmup
+const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 172;
+/// How long we should run the inter-electrode resistance phase for
+const GAUGE_RESISTANCE_PHASE_MS: u64 = (6*AVG_HEAT_CYCLE_DURATION_SEC) * 1000;
+
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
 /// Temp at which we attempt to submerge thermo probes in electrolyte melt
@@ -36,7 +41,7 @@ const ELECTROLYTE_TARGET_TEMP_C:f32 = 780.;
 const MIN_INTER_ELECTRODE_OHMS: f32 = 19.;
 
 /// The EWMA of dR/dt drops below this value when a dendrite forms
-const DENDRITE_OHM_RATE_CLIFF: f32 = -0.75;
+const DENDRITE_OHM_RATE_CLIFF: f32 = -0.8;
 
 /// A guess at what a stable dendrite resistance would be when it approaches the anode
 const STABLE_DENDRITE_OHMS: f32 = 20.;
@@ -44,6 +49,7 @@ const STABLE_DENDRITE_OHMS: f32 = 20.;
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
 const PLATEAU_CURRENT_GAP_MA: f32 = 6.0;
+
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
 
@@ -51,6 +57,8 @@ const OPEN_CIRCUIT_VOLTS: f32 = 9.;
 const DENDRITE_CREEP_MA: f32 = 4.; 
 /// Used to probe for electrolyte or carbon bridge conductivity
 const PROBE_CURRENT_MA: f32 = 1.;
+/// Used to gauge the initial (presumably zero-growth) inter-electrode resistance
+const GAUGE_CURRENT_MA: f32 = 12.;
 /// Used after we think we've achieved a solid carbon bridge 
 const COOLDOWN_PROBE_CURRENT_MA: f32 = 0.5;
 /// The minimum increment for drive current, as specified in the current source docs
@@ -140,14 +148,16 @@ fn current_from_current_density_ma(density_ma_cm2: f64, wire_od_mm: f64, wire_le
 enum DrivePhase {
     /// check that the electrode is immersed in conductive melt
     Warmup = 0, 
+    /// Measure initial resistance between electrodes
+    GaugeResistance = 1,
     /// Attach initial carbon atoms to cathode surface
-    Anchoring = 1, 
+    Anchoring = 2, 
      /// Growth of carbon chains between electrodes
-    Growth = 2,
+    Growth = 3,
     /// Stable dendrite growth?
-    Dendrite = 3, 
+    Dendrite = 4, 
     /// Monitor the inter-electrode conductivity
-    Cooldown = 4, 
+    Cooldown = 5, 
 } 
 
 /**
@@ -274,29 +284,38 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
 #[derive(Debug, Clone)]
 pub struct ElectrodeState {
     drive_phase: DrivePhase,
-    last_update_millis: i64,
+    last_update_ms: i64,
+    phase_start_ms: i64,
     inter_electrode_ohms: f32,
+    /// Exponential moving average of inter-electrode resistance
+    ohms_ewma: f32,
+    /// Minimum of ohms EWMA
+    min_ohms_ewma: f32,
+    /// Maximum value of inter-electrode resistance at start of growth phase
+    max_ohms_ewma: f32,
     /// Exponential moving average of the rate of change (dR/dt) of inter-electrode resistance
     ohms_rate_ewma: f32,
     target_drive_ma: f32,
     reported_drive_ma: f32,
     measured_ma: f32,
     measured_volts: f32,
-    growth_ma: f32,
 }
 
 /// State the electrode controller is reset to when we're in "warmup" mode below the active melt temperature
 const INITIAL_ELECTRODE_STATE: ElectrodeState = 
     ElectrodeState {
             drive_phase:DrivePhase::Warmup,
-            last_update_millis:0,
+            last_update_ms:0,
+            phase_start_ms:0,
             inter_electrode_ohms:INF_INTER_ELECTRODE_OHMS,
+            ohms_ewma:0.,
+            min_ohms_ewma: INF_INTER_ELECTRODE_OHMS,
+            max_ohms_ewma: 0.,
             ohms_rate_ewma:0.,
             target_drive_ma:0.,
             reported_drive_ma:0.,
             measured_ma:0.,
             measured_volts:0., 
-            growth_ma: 40. 
         }; 
 /**
  * Adjust the electrode current based on melt condition and drive phase
@@ -328,11 +347,23 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
         };
 
+    let phase_duration_ms = state.phase_start_ms.saturating_sub(now_millis) as u64;
+    let drive_duration_ms = now_millis.saturating_sub(state.last_update_ms) as u64;
+    let drive_duration_sec = (drive_duration_ms as f32)/1000.;
+
     let mut dendrite_formed = false;
-    // Calculate dR/dt, EWMA of dR/dt, then look for drops of -0.5
+    // Calculate dR/dt, EWMA of dR/dt, then look for significant drops 
     if inter_electrode_ohms != INF_INTER_ELECTRODE_OHMS {
-        let delta_secs = ((now_millis - state.last_update_millis) as f32)/1000.;
-        let dr_dt = (inter_electrode_ohms - state.inter_electrode_ohms)/delta_secs;
+        update_ewma(&mut state.ohms_ewma, inter_electrode_ohms, RESISTANCE_EWMA_ALPHA);
+        if state.ohms_ewma < state.min_ohms_ewma {
+            // TODO each one of these drops can be significant, especially during "growth" phase
+            state.min_ohms_ewma = state.ohms_ewma;
+            if state.min_ohms_ewma < (state.max_ohms_ewma / 3.) {
+                dendrite_formed = true;
+            }
+        }
+
+        let dr_dt = (inter_electrode_ohms - state.inter_electrode_ohms)/drive_duration_sec;
         update_ewma(&mut state.ohms_rate_ewma,dr_dt, RESISTANCE_EWMA_ALPHA);
         if state.ohms_rate_ewma <= DENDRITE_OHM_RATE_CLIFF {
             dendrite_formed = true;
@@ -352,33 +383,70 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
         else { 100. }; // outrageously large current gap
 
-    if state.drive_phase == DrivePhase::Anchoring || state.drive_phase == DrivePhase::Growth
-    {
-        // momentarily disable current
-        let probe_reported_ma = set_electrode_current_drive(ctx, 0.).await?;
-        if probe_reported_ma != 0. {
-            println!("probe_reported_ma: {probe_reported_ma:.3} ");
+    
+    // First shut off the current under certain circumstances
+    match state.drive_phase {
+        DrivePhase::Anchoring | DrivePhase::Growth => {
+            // momentarily disable current
+            let probe_reported_ma = set_electrode_current_drive(ctx, 0.).await?;
+            if probe_reported_ma != 0. {
+                println!("probe_reported_ma: {probe_reported_ma:.3} ");
+            }
+            sleep(HOLD_ZERO_PULSE_TIME).await;
         }
-        sleep(HOLD_ZERO_PULSE_TIME).await;
+        DrivePhase::GaugeResistance  => {
+            let shutoff_duration = {
+                let half_time = Duration::from_millis(drive_duration_ms  / 2);
+                if half_time < HOLD_ZERO_PULSE_TIME { HOLD_ZERO_PULSE_TIME }
+                else { half_time }
+            };
+            let probe_reported_ma = set_electrode_current_drive(ctx, 0.).await?;
+            if probe_reported_ma != 0. {
+                println!("probe_reported_ma: {probe_reported_ma:.3} ");
+            }
+            sleep(shutoff_duration).await;
+        }
+        _ => {
+
+        }
     }
 
+    // Then calculate any drive phase transitions
     match state.drive_phase {
         DrivePhase::Warmup => {
             new_drive_ma = PROBE_CURRENT_MA;
             if current_gap < 0.2 {
                 // the measured current is about the same as probe current
+                new_drive_ma = GAUGE_CURRENT_MA;
+                state.drive_phase = DrivePhase::GaugeResistance;
+                state.phase_start_ms = now_millis;
+                println!("{:?} start GaugeResistance phase ",now_utc_dt.timestamp());
+            }
+        }
+        DrivePhase::GaugeResistance => {
+            new_drive_ma = GAUGE_CURRENT_MA;
+            if state.max_ohms_ewma < state.ohms_ewma {
+                state.max_ohms_ewma = state.ohms_ewma;
+            }
+            // continue probing over multiple heat/cool cycles to characterize resistance
+            if phase_duration_ms > GAUGE_RESISTANCE_PHASE_MS {
                 state.drive_phase = DrivePhase::Anchoring;
-                println!("start anchor phase at: {:?}",chrono::Utc::now().timestamp());
+                state.phase_start_ms = now_millis;
+                println!("{:?} end GaugeResistance phase with max {:.3} Ohms ({} ms) ",
+                now_utc_dt.timestamp(), state.max_ohms_ewma, phase_duration_ms);
             }
         }
         DrivePhase::Anchoring => { 
             if reported_gap > PLATEAU_CURRENT_GAP_MA {
                 // the actual current has diverged from desired current
                 state.drive_phase = DrivePhase::Growth;
-                state.growth_ma = state.target_drive_ma;
+                state.phase_start_ms = now_millis;
                 state.ohms_rate_ewma = 0.; //reset because it's scrambled by prior descent
-                println!("{:?} end Anchoring phase with target {:.3} mA vs reported {:.3} mA", 
-                    chrono::Utc::now().timestamp(), state.target_drive_ma, state.reported_drive_ma);
+                state.max_ohms_ewma = state.ohms_ewma;
+                println!("{:?} end Anchoring phase with max {:.3} Ohms, target {:.3} mA vs reported {:.3} mA ({} ms)", 
+                    now_utc_dt.timestamp(), state.max_ohms_ewma, state.target_drive_ma, state.reported_drive_ma,
+                    phase_duration_ms
+                );
             }
             else if reported_gap > 1.0 {
                 // slow down the rate of increasing current
@@ -393,20 +461,23 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             if dendrite_formed {
                 // switch to dendrite preservation
                 state.drive_phase = DrivePhase::Dendrite;
-                println!("{:?} end Growth phase with V {:.2} R {:.2} dR/dt {:.3}", 
-                    chrono::Utc::now().timestamp(), state.measured_volts, state.inter_electrode_ohms, state.ohms_rate_ewma);
+                state.phase_start_ms = now_millis;
+                println!("{:?} end Growth phase with V {:.2} R {:.2} dR/dt {:.3} ({} ms)", 
+                    now_utc_dt.timestamp(), state.measured_volts, 
+                    state.inter_electrode_ohms, state.ohms_rate_ewma,
+                    phase_duration_ms
+                );
             }
-            // else if reported_gap > 1.5*PLATEAU_CURRENT_GAP_MA {
-            //     // try nudging down the drive current a bit
-            //     new_drive_ma = (2.*state.target_drive_ma + state.reported_drive_ma) / 3.;
-            // }
         }
         DrivePhase::Dendrite => {
             if state.inter_electrode_ohms < MIN_INTER_ELECTRODE_OHMS  {
                 // inter-electrode resistance is close to zero, indicating that the electrode-electrode gap has been bridged
                 state.drive_phase = DrivePhase::Cooldown;
-                println!("{:?} end Dendrite phase with V {:.2} R {:.2} dR/dt {:.3}", 
-                    chrono::Utc::now().timestamp(), state.measured_volts, state.inter_electrode_ohms, state.ohms_rate_ewma);
+                state.phase_start_ms = now_millis;
+                println!("{:?} end Dendrite phase with V {:.2} R {:.2} dR/dt {:.3} ({} ms)", 
+                    now_utc_dt.timestamp(), state.measured_volts, state.inter_electrode_ohms, state.ohms_rate_ewma,
+                    phase_duration_ms
+                );
             }
             else {
                 new_drive_ma = DENDRITE_CREEP_MA;
@@ -422,7 +493,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     // Now, update the drive current for the remainder of the main loop duration
     state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
     state.target_drive_ma = new_drive_ma;
-    state.last_update_millis = now_millis;
+    state.last_update_ms = chrono::Utc::now().timestamp_millis();
 
     Ok(())
 }
@@ -449,7 +520,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R,dRdT";
+    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R,Rew,MinRew,dRdTew";
     println!("{}",CSV_HEADER);
     writeln!(csv_writer, "{}", CSV_HEADER)?;
 
@@ -479,23 +550,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         else {
             electrode_state = INITIAL_ELECTRODE_STATE;
+            electrode_state.phase_start_ms = current_utc_dt.timestamp_millis();
         }
 
-        let log_line = format!( "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.1},{:.3}",
+        let log_line = format!( "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.1},{:.3},{:.1},{:.3}",
             current_utc_dt.timestamp(),
             furnace_state.heater_on as u8,
             furnace_state.measured_temp_c,
             electrode_state.target_drive_ma, electrode_state.reported_drive_ma, electrode_state.measured_ma,
-            electrode_state.measured_volts, electrode_state.inter_electrode_ohms,
+            electrode_state.measured_volts, 
+            electrode_state.inter_electrode_ohms, electrode_state.ohms_ewma, electrode_state.min_ohms_ewma,
             electrode_state.ohms_rate_ewma
         );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
-        csv_writer.flush()?;
+        // csv_writer.flush()?;
         
         // Attempt to sync to about 1 Hz measurements
         sleep_until(next_run_instant).await;
     }
+
+    println!("Flushing log file...");
+    csv_writer.flush()?;
 
     // Attempt to shut off all outputs before exiting
     zero_control_outputs(&mut ctx).await?;
