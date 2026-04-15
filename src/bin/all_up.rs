@@ -347,8 +347,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
         };
 
-    let phase_duration_ms = state.phase_start_ms.saturating_sub(now_millis) as u64;
-    let drive_duration_ms = now_millis.saturating_sub(state.last_update_ms) as u64;
+    let phase_duration_ms = if state.phase_start_ms <  now_millis { (now_millis - state.phase_start_ms) as u64 } else { 0 };
+    let drive_duration_ms = if state.last_update_ms <  now_millis { ( now_millis - state.last_update_ms) as u64 } else { 0 };
+
     let drive_duration_sec = (drive_duration_ms as f32)/1000.;
 
     let mut dendrite_formed = false;
