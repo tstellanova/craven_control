@@ -51,7 +51,7 @@ const STABLE_DENDRITE_OHMS: f32 = 20.;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
-const PLATEAU_CURRENT_GAP_MA: f32 = 6.0;
+const PLATEAU_CURRENT_GAP_MA: f32 = 10.0;
 
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
@@ -473,11 +473,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
             else if reported_gap > 1.0 {
                 // slow down the rate of increasing current
-                new_drive_ma = state.target_drive_ma + 2.*MIN_DRIVE_CURRENT_INCR_MA;
+                new_drive_ma = state.target_drive_ma + MIN_DRIVE_CURRENT_INCR_MA;
             }
             else {
                 // increase the desired drive current until reported current diverges
-                new_drive_ma = state.target_drive_ma + 10.*MIN_DRIVE_CURRENT_INCR_MA;
+                new_drive_ma = state.target_drive_ma + 5.*MIN_DRIVE_CURRENT_INCR_MA;
             }
         }
         DrivePhase::Growth => {  
