@@ -26,7 +26,7 @@ const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(50);
 /// Average duration of a typical heat/cool cycle after warmup
 const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 172;
 /// How long we should run the inter-electrode resistance phase for
-const GAUGE_RESISTANCE_PHASE_MS: u64 = (6*AVG_HEAT_CYCLE_DURATION_SEC) * 1000;
+const GAUGE_RESISTANCE_PHASE_MS: u64 = (4*AVG_HEAT_CYCLE_DURATION_SEC) * 1000;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -355,19 +355,23 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let mut dendrite_formed = false;
     // Calculate dR/dt, EWMA of dR/dt, then look for significant drops 
     if inter_electrode_ohms != INF_INTER_ELECTRODE_OHMS {
-        update_ewma(&mut state.ohms_ewma, inter_electrode_ohms, RESISTANCE_EWMA_ALPHA);
-        if state.ohms_ewma < state.min_ohms_ewma {
-            // TODO each one of these drops can be significant, especially during "growth" phase
-            state.min_ohms_ewma = state.ohms_ewma;
-            if state.min_ohms_ewma < (state.max_ohms_ewma / 3.) {
-                dendrite_formed = true;
-            }
-        }
-
-        let dr_dt = (inter_electrode_ohms - state.inter_electrode_ohms)/drive_duration_sec;
+        let dr_dt = (inter_electrode_ohms - state.ohms_ewma)/drive_duration_sec;
         update_ewma(&mut state.ohms_rate_ewma,dr_dt, RESISTANCE_EWMA_ALPHA);
-        if state.ohms_rate_ewma <= DENDRITE_OHM_RATE_CLIFF {
-            dendrite_formed = true;
+        // if state.ohms_rate_ewma <= DENDRITE_OHM_RATE_CLIFF {
+        //     // TODO this may not be accurate --- revisit
+        //     dendrite_formed = true;
+        // }
+                
+        update_ewma(&mut state.ohms_ewma, inter_electrode_ohms, RESISTANCE_EWMA_ALPHA);
+        if state.ohms_rate_ewma.abs() < 10. {
+            if state.ohms_ewma < state.min_ohms_ewma {
+                println!("min_ohms_ewma old: {:.3} new: {:.3}", state.min_ohms_ewma, state.ohms_ewma);
+                // TODO each one of these drops can be significant, especially during "growth" phase
+                state.min_ohms_ewma = state.ohms_ewma;
+                if state.min_ohms_ewma < (state.max_ohms_ewma / 3.) {
+                    dendrite_formed = true;
+                }
+            }
         }
     }
 
@@ -390,8 +394,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Anchoring | DrivePhase::Growth => {
             // momentarily disable current
             let probe_reported_ma = set_electrode_current_drive(ctx, 0.).await?;
-            if probe_reported_ma != 0. {
-                println!("probe_reported_ma: {probe_reported_ma:.3} ");
+            if probe_reported_ma > MIN_DRIVE_CURRENT_INCR_MA {
+                println!("probe_reported_ma: {probe_reported_ma:.2} ");
             }
             sleep(HOLD_ZERO_PULSE_TIME).await;
         }
@@ -415,12 +419,13 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     // Then calculate any drive phase transitions
     match state.drive_phase {
         DrivePhase::Warmup => {
-            new_drive_ma = PROBE_CURRENT_MA;
+            new_drive_ma = PROBE_CURRENT_MA * 2.;
             if current_gap < 0.2 {
                 // the measured current is about the same as probe current
                 new_drive_ma = GAUGE_CURRENT_MA;
                 state.drive_phase = DrivePhase::GaugeResistance;
                 state.phase_start_ms = now_millis;
+                state.min_ohms_ewma = INF_INTER_ELECTRODE_OHMS; //reset due to prior phase corruption
                 println!("{:?} start GaugeResistance phase ",now_utc_dt.timestamp());
             }
         }
@@ -433,8 +438,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             if phase_duration_ms > GAUGE_RESISTANCE_PHASE_MS {
                 state.drive_phase = DrivePhase::Anchoring;
                 state.phase_start_ms = now_millis;
-                println!("{:?} end GaugeResistance phase with max {:.3} Ohms ({} ms) ",
-                now_utc_dt.timestamp(), state.max_ohms_ewma, phase_duration_ms);
+                println!("{:?} end GaugeResistance phase with min {:.3} max {:.3} Ohms ({} ms) ",
+                now_utc_dt.timestamp(), state.min_ohms_ewma, state.max_ohms_ewma, 
+                phase_duration_ms);
+                // set the "initial max" to the gauged minimum value
+                state.max_ohms_ewma = state.min_ohms_ewma;
             }
         }
         DrivePhase::Anchoring => { 
