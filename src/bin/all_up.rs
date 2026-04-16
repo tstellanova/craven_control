@@ -61,7 +61,7 @@ const DENDRITE_CREEP_MA: f32 = 4.;
 /// Used to probe for electrolyte or carbon bridge conductivity
 const PROBE_CURRENT_MA: f32 = 1.;
 /// Used to gauge the initial (presumably zero-growth) inter-electrode resistance
-const GAUGE_CURRENT_MA: f32 = 12.;
+const GAUGE_CURRENT_MA: f32 = 9.;
 /// Used after we think we've achieved a solid carbon bridge 
 const COOLDOWN_PROBE_CURRENT_MA: f32 = 0.5;
 /// The minimum increment for drive current, as specified in the current source docs
@@ -331,8 +331,22 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 ) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    let now_utc_dt = chrono::Utc::now();
-    let now_millis = now_utc_dt.timestamp_millis();
+    let mut now_utc_dt = chrono::Utc::now();
+    let mut now_millis = now_utc_dt.timestamp_millis();
+    let mut drive_duration_ms: u64 = if state.last_update_ms <  now_millis { ( now_millis - state.last_update_ms) as u64 } else { 1 };
+
+    // if drive_duration_ms < 400 {
+    //     //println!("drive_duration_ms {} ", drive_duration_ms);
+    //     let prolong_duration = 400 - drive_duration_ms;
+    //     sleep(Duration::from_millis(prolong_duration)).await;
+    //     now_utc_dt = chrono::Utc::now();
+    //     now_millis = now_utc_dt.timestamp_millis();
+    //     drive_duration_ms = if state.last_update_ms <  now_millis { ( now_millis - state.last_update_ms) as u64 } else { 1 };
+    // }
+
+
+    let drive_duration_sec = (drive_duration_ms as f32)/1000.;
+    let phase_duration_ms = if state.phase_start_ms <  now_millis { (now_millis - state.phase_start_ms) as u64 } else { 0 };
 
     // reuse old drive current until instructed otherwise
     let mut new_drive_ma: f32 = state.target_drive_ma;
@@ -354,12 +368,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
         };
 
-    let phase_duration_ms = if state.phase_start_ms <  now_millis { (now_millis - state.phase_start_ms) as u64 } else { 0 };
-    let drive_duration_ms = if state.last_update_ms <  now_millis { ( now_millis - state.last_update_ms) as u64 } else { 0 };
-    if drive_duration_ms < 500 {
-        println!("drive_duration_ms {} ", drive_duration_ms);
-    }
-    let drive_duration_sec = (drive_duration_ms as f32)/1000.;
 
     // Check for significant drops in resistance
     let mut dendrite_formed = false;
@@ -401,7 +409,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             // momentarily disable current
             let probe_reported_ma = set_electrode_current_drive(ctx, 0.).await?;
             if probe_reported_ma > MIN_DRIVE_CURRENT_INCR_MA {
-                println!("probe_reported_ma: {probe_reported_ma:.2} ");
+                println!("probe_reported_ma: {:.2}  > {:.2}",probe_reported_ma,MIN_DRIVE_CURRENT_INCR_MA);
             }
             sleep(HOLD_ZERO_PULSE_TIME).await;
         }
@@ -412,8 +420,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 else { half_time }
             };
             let probe_reported_ma = set_electrode_current_drive(ctx, 0.).await?;
-            if probe_reported_ma != 0. {
-                println!("probe_reported_ma: {probe_reported_ma:.3} ");
+            if probe_reported_ma > MIN_DRIVE_CURRENT_INCR_MA {
+                println!("probe_reported_ma: {:.2}  > {:.2}",probe_reported_ma,MIN_DRIVE_CURRENT_INCR_MA);
             }
             sleep(shutoff_duration).await;
         }
