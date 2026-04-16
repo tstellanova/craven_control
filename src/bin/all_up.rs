@@ -26,7 +26,7 @@ const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(50);
 /// Average duration of a typical heat/cool cycle after warmup
 const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 172;
 /// How long we should run the inter-electrode resistance phase for
-const GAUGE_RESISTANCE_PHASE_MS: u64 = (4*AVG_HEAT_CYCLE_DURATION_SEC) * 1000;
+const GAUGE_RESISTANCE_PHASE_MS: u64 = (3*AVG_HEAT_CYCLE_DURATION_SEC) * 1000;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -35,10 +35,13 @@ const PROBE_CHECK_TEMP_C:f32 = 550.;
 /// Temp we expect to see when probe is succesfully inserted into melt
 const PROBE_INSERTED_TEMP_C:f32 = 600.;
 /// The center temperature we are trying to achieve for the electrolyte melt
-const ELECTROLYTE_TARGET_TEMP_C:f32 = 780.;
+const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 
 /// If the electrodes were shorted together at room temperature, what resistance do we expect?
 const MIN_INTER_ELECTRODE_OHMS: f32 = 19.;
+
+/// The limit of dR/dt magnitude indicating that we're reaching a transition
+const OHM_RATE_SETTLING_LIMIT: f32 = 10.0;
 
 /// The EWMA of dR/dt drops below this value when a dendrite forms
 const DENDRITE_OHM_RATE_CLIFF: f32 = -0.8;
@@ -70,6 +73,9 @@ const MAX_AMMETER_VAL: f32 = 20.0;
 
 /// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
 const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
+
+/// Weighting alpha for calculating Exponential Weighted Moving Average of dR/dt
+const DRDT_EWMA_ALPHA: f32 = 0.1;
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -328,6 +334,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let now_utc_dt = chrono::Utc::now();
     let now_millis = now_utc_dt.timestamp_millis();
 
+    // reuse old drive current until instructed otherwise
     let mut new_drive_ma: f32 = state.target_drive_ma;
     
     let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
@@ -349,24 +356,23 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
     let phase_duration_ms = if state.phase_start_ms <  now_millis { (now_millis - state.phase_start_ms) as u64 } else { 0 };
     let drive_duration_ms = if state.last_update_ms <  now_millis { ( now_millis - state.last_update_ms) as u64 } else { 0 };
-
+    if drive_duration_ms < 500 {
+        println!("drive_duration_ms {} ", drive_duration_ms);
+    }
     let drive_duration_sec = (drive_duration_ms as f32)/1000.;
 
+    // Check for significant drops in resistance
     let mut dendrite_formed = false;
-    // Calculate dR/dt, EWMA of dR/dt, then look for significant drops 
     if inter_electrode_ohms != INF_INTER_ELECTRODE_OHMS {
         let dr_dt = (inter_electrode_ohms - state.ohms_ewma)/drive_duration_sec;
-        update_ewma(&mut state.ohms_rate_ewma,dr_dt, RESISTANCE_EWMA_ALPHA);
-        // if state.ohms_rate_ewma <= DENDRITE_OHM_RATE_CLIFF {
-        //     // TODO this may not be accurate --- revisit
-        //     dendrite_formed = true;
-        // }
+        update_ewma(&mut state.ohms_rate_ewma,dr_dt, DRDT_EWMA_ALPHA);
                 
         update_ewma(&mut state.ohms_ewma, inter_electrode_ohms, RESISTANCE_EWMA_ALPHA);
-        if state.ohms_rate_ewma.abs() < 10. {
+
+        // only evaluate minimum phase ohms when rate is not extreme 
+        if state.ohms_rate_ewma.abs() < OHM_RATE_SETTLING_LIMIT  {
             if state.ohms_ewma < state.min_ohms_ewma {
                 println!("min_ohms_ewma old: {:.3} new: {:.3}", state.min_ohms_ewma, state.ohms_ewma);
-                // TODO each one of these drops can be significant, especially during "growth" phase
                 state.min_ohms_ewma = state.ohms_ewma;
                 if state.min_ohms_ewma < (state.max_ohms_ewma / 3.) {
                     dendrite_formed = true;
@@ -530,6 +536,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut csv_writer = BufWriter::new(logfile);
 
     const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R,Rew,MinRew,dRdTew";
+    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.1},{:.1},{:.2},{:.3},{:.1},{:.2},{:.1},{:.3}" } }
+    
     println!("{}",CSV_HEADER);
     writeln!(csv_writer, "{}", CSV_HEADER)?;
 
@@ -562,7 +570,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             electrode_state.phase_start_ms = current_utc_dt.timestamp_millis();
         }
 
-        let log_line = format!( "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.1},{:.3},{:.1},{:.3}",
+        let log_line = format!( CSV_LINE_FORMAT!(),
             current_utc_dt.timestamp(),
             furnace_state.heater_on as u8,
             furnace_state.measured_temp_c,
@@ -573,7 +581,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
-        // csv_writer.flush()?;
         
         // Attempt to sync to about 1 Hz measurements
         sleep_until(next_run_instant).await;
