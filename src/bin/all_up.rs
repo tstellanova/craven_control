@@ -28,9 +28,11 @@ const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 260;
 const AVG_PKPK_HEAT_CYCLE_MS: u64 = AVG_HEAT_CYCLE_DURATION_SEC * 1000;
 
 /// Time limite for inter-electrode resistance gauging phase
-const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = (5*AVG_PKPK_HEAT_CYCLE_MS)/2;
+const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = 2*AVG_PKPK_HEAT_CYCLE_MS;
 /// Time limit for growth phase
 const GROWTH_PHASE_DUR_MS: u64 = 4*AVG_PKPK_HEAT_CYCLE_MS;
+/// Time limit for minimum resistance to drop during Growth phase
+const GROWTH_PHASE_MINR_LIMIT_MS: u64 = (5*AVG_HEAT_CYCLE_DURATION_SEC)/2;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -65,7 +67,7 @@ const DENDRITE_CREEP_MA: f32 = 4.;
 /// Used to probe for electrolyte or carbon bridge conductivity
 const PROBE_CURRENT_MA: f32 = 1.;
 /// Used to gauge the initial (presumably zero-growth) inter-electrode resistance
-const GAUGE_CURRENT_MA: f32 = 9.;
+const GAUGE_CURRENT_MA: f32 = 5.;
 /// Used after we think we've achieved a solid carbon bridge 
 const HOLDING_PROBE_CURRENT_MA: f32 = 0.5;
 /// The minimum increment for drive current, as specified in the current source docs
@@ -301,6 +303,7 @@ pub struct ElectrodeState {
     ohms_ewma: f32,
     /// Minimum of ohms EWMA
     min_ohms_ewma: f32,
+    minr_update_ms: i64,
     /// Maximum value of inter-electrode resistance at start of growth phase
     max_ohms_ewma: f32,
     /// Exponential moving average of the rate of change (dR/dt) of inter-electrode resistance
@@ -320,6 +323,7 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             inter_electrode_ohms:INF_INTER_ELECTRODE_OHMS,
             ohms_ewma:0.,
             min_ohms_ewma: INF_INTER_ELECTRODE_OHMS,
+            minr_update_ms:0,
             max_ohms_ewma: 0.,
             ohms_rate_ewma:0.,
             target_drive_ma:0.,
@@ -350,7 +354,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let measured_electrode_ma: f32 = 
         if state.target_drive_ma > 0. {
             if elecm_volts < OPEN_CIRCUIT_VOLTS {
-                if elecm_ma < MAX_AMMETER_VAL && elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma }
+                if state.reported_drive_ma < MAX_AMMETER_VAL && elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma }
                 else { state.reported_drive_ma }
             } else { 0. }
         }  else { 0. };
@@ -376,6 +380,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             if state.ohms_ewma < state.min_ohms_ewma {
                 println!("min_ohms_ewma old: {:.3} new: {:.3}", state.min_ohms_ewma, state.ohms_ewma);
                 state.min_ohms_ewma = state.ohms_ewma;
+                state.minr_update_ms = now_millis;
                 if state.min_ohms_ewma < (state.max_ohms_ewma / 3.) {
                     dendrite_formed = true;
                 }
@@ -461,7 +466,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Growth => {  
-            if dendrite_formed || phase_duration_ms > GROWTH_PHASE_DUR_MS {
+            // TODO use GROWTH_PHASE_MINR_LIMIT_MS instead
+            let minr_drop_delay = if now_millis > state.minr_update_ms { now_millis - state.minr_update_ms } else { 0};
+            if dendrite_formed || minr_drop_delay > GROWTH_PHASE_MINR_LIMIT_MS as i64 {
                 // switch to dendrite preservation
                 state.drive_phase = DrivePhase::Dendrite;
                 state.phase_start_ms = now_millis;
