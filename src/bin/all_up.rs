@@ -104,7 +104,7 @@ async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
 -> Result<(f32, f32), Box<dyn std::error::Error>> 
 {
-    sleep(Duration::from_millis(100)).await;
+    sleep(MODBUS_RW_DELAY);
 //    read_ykdaq1402_iv_adc(ctx).await
 
   let potential  = read_wa8tai_iv(ctx,1).await?;
@@ -338,15 +338,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let mut now_utc_dt = chrono::Utc::now();
     let mut now_millis = now_utc_dt.timestamp_millis();
     let mut drive_duration_ms: u64 = if state.last_update_ms <  now_millis { ( now_millis - state.last_update_ms) as u64 } else { 1 };
-
-    // if drive_duration_ms < 400 {
-    //     //println!("drive_duration_ms {} ", drive_duration_ms);
-    //     let prolong_duration = 400 - drive_duration_ms;
-    //     sleep(Duration::from_millis(prolong_duration)).await;
-    //     now_utc_dt = chrono::Utc::now();
-    //     now_millis = now_utc_dt.timestamp_millis();
-    //     drive_duration_ms = if state.last_update_ms <  now_millis { ( now_millis - state.last_update_ms) as u64 } else { 1 };
-    // }
 
 
     let drive_duration_sec = (drive_duration_ms as f32)/1000.;
