@@ -28,7 +28,7 @@ const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 260;
 const AVG_PKPK_HEAT_CYCLE_MS: u64 = AVG_HEAT_CYCLE_DURATION_SEC * 1000;
 
 /// Time limite for inter-electrode resistance gauging phase
-const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = 2*AVG_PKPK_HEAT_CYCLE_MS;
+const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = AVG_PKPK_HEAT_CYCLE_MS;
 /// Time limit for growth phase
 const GROWTH_PHASE_DUR_MS: u64 = 4*AVG_PKPK_HEAT_CYCLE_MS;
 /// Time limit for minimum resistance to drop during Growth phase
@@ -451,6 +451,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.phase_start_ms = now_millis;
                 state.ohms_rate_ewma = 0.; //reset because it's scrambled by prior descent
                 state.max_ohms_ewma = state.ohms_ewma;
+                state.minr_update_ms = now_millis;
                 println!("{:?} end Anchoring phase with max {:.3} Ohms, target {:.3} mA vs reported {:.3} mA ({} ms)", 
                     now_utc_dt.timestamp(), state.max_ohms_ewma, state.target_drive_ma, state.reported_drive_ma,
                     phase_duration_ms
