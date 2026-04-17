@@ -467,9 +467,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Growth => {  
-            // TODO use GROWTH_PHASE_MINR_LIMIT_MS instead
             let minr_drop_delay = if now_millis > state.minr_update_ms { now_millis - state.minr_update_ms } else { 0};
-            if dendrite_formed || minr_drop_delay > GROWTH_PHASE_MINR_LIMIT_MS as i64 {
+            if minr_drop_delay > GROWTH_PHASE_MINR_LIMIT_MS as i64 {
                 // switch to dendrite preservation
                 state.drive_phase = DrivePhase::Dendrite;
                 state.phase_start_ms = now_millis;
@@ -550,6 +549,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut furnace_state = INITIAL_FURNACE_STATE;
     let mut electrode_state =  INITIAL_ELECTRODE_STATE;
 
+    let mut loop_count = 0;
     while running.load(Ordering::SeqCst) { 
         let current_instant = tokio::time::Instant::now();
         let current_utc_dt = chrono::Utc::now();
@@ -577,6 +577,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
+        loop_count = (loop_count + 1) % 10;
+        if loop_count == 0 { csv_writer.flush(); }
         
         // Attempt to sync to about 1 Hz measurements
         sleep_until(next_run_instant).await;
