@@ -23,10 +23,14 @@ const MODBUS_RW_DELAY: Duration = Duration::from_millis(25);
 const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
 const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(50);
 
-/// Average duration of a typical heat/cool cycle after warmup
-const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 172;
-/// How long we should run the inter-electrode resistance phase for
-const GAUGE_RESISTANCE_PHASE_MS: u64 = (3*AVG_HEAT_CYCLE_DURATION_SEC) * 1000;
+/// Average peak-to-peak interval for heating after warmup
+const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 260;
+const AVG_PKPK_HEAT_CYCLE_MS: u64 = AVG_HEAT_CYCLE_DURATION_SEC * 1000;
+
+/// Time limite for inter-electrode resistance gauging phase
+const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = (5*AVG_PKPK_HEAT_CYCLE_MS)/2;
+/// Time limit for growth phase
+const GROWTH_PHASE_DUR_MS: u64 = 4*AVG_PKPK_HEAT_CYCLE_MS;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -51,7 +55,7 @@ const STABLE_DENDRITE_OHMS: f32 = 20.;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
-const PLATEAU_CURRENT_GAP_MA: f32 = 10.0;
+const PLATEAU_CURRENT_GAP_MA: f32 = 12.0;
 
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
@@ -63,7 +67,7 @@ const PROBE_CURRENT_MA: f32 = 1.;
 /// Used to gauge the initial (presumably zero-growth) inter-electrode resistance
 const GAUGE_CURRENT_MA: f32 = 9.;
 /// Used after we think we've achieved a solid carbon bridge 
-const COOLDOWN_PROBE_CURRENT_MA: f32 = 0.5;
+const HOLDING_PROBE_CURRENT_MA: f32 = 0.5;
 /// The minimum increment for drive current, as specified in the current source docs
 const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
 /// The range of the ammeter
@@ -163,7 +167,7 @@ enum DrivePhase {
     /// Stable dendrite growth?
     Dendrite = 4, 
     /// Monitor the inter-electrode conductivity
-    Cooldown = 5, 
+    Holding = 5, 
 } 
 
 /**
@@ -374,7 +378,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     if inter_electrode_ohms != INF_INTER_ELECTRODE_OHMS {
         let dr_dt = (inter_electrode_ohms - state.ohms_ewma)/drive_duration_sec;
         update_ewma(&mut state.ohms_rate_ewma,dr_dt, DRDT_EWMA_ALPHA);
-                
         update_ewma(&mut state.ohms_ewma, inter_electrode_ohms, RESISTANCE_EWMA_ALPHA);
 
         // only evaluate minimum phase ohms when rate is not extreme 
@@ -405,7 +408,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     
     // First shut off the current under certain circumstances
     match state.drive_phase {
-        DrivePhase::Anchoring | DrivePhase::Growth => {
+        DrivePhase::Anchoring | DrivePhase::Growth | DrivePhase::GaugeResistance => {
             // momentarily disable current
             let probe_reported_ma = set_electrode_current_drive(ctx, 0.).await?;
             if probe_reported_ma > MIN_DRIVE_CURRENT_INCR_MA {
@@ -413,21 +416,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
             sleep(HOLD_ZERO_PULSE_TIME).await;
         }
-        DrivePhase::GaugeResistance  => {
-            let shutoff_duration = {
-                let half_time = Duration::from_millis(drive_duration_ms  / 2);
-                if half_time < HOLD_ZERO_PULSE_TIME { HOLD_ZERO_PULSE_TIME }
-                else { half_time }
-            };
-            let probe_reported_ma = set_electrode_current_drive(ctx, 0.).await?;
-            if probe_reported_ma > MIN_DRIVE_CURRENT_INCR_MA {
-                println!("probe_reported_ma: {:.2}  > {:.2}",probe_reported_ma,MIN_DRIVE_CURRENT_INCR_MA);
-            }
-            sleep(shutoff_duration).await;
-        }
-        _ => {
-
-        }
+        _ => {  }
     }
 
     // Then calculate any drive phase transitions
@@ -436,7 +425,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             new_drive_ma = PROBE_CURRENT_MA * 2.;
             if current_gap < 0.2 {
                 // the measured current is about the same as probe current
-                new_drive_ma = GAUGE_CURRENT_MA;
+                new_drive_ma = GAUGE_CURRENT_MA / 2.;
                 state.drive_phase = DrivePhase::GaugeResistance;
                 state.phase_start_ms = now_millis;
                 state.min_ohms_ewma = INF_INTER_ELECTRODE_OHMS; //reset due to prior phase corruption
@@ -449,13 +438,13 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.max_ohms_ewma = state.ohms_ewma;
             }
             // continue probing over multiple heat/cool cycles to characterize resistance
-            if phase_duration_ms > GAUGE_RESISTANCE_PHASE_MS {
+            if phase_duration_ms > GAUGE_RESISTANCE_PHASE_DUR_MS {
                 state.drive_phase = DrivePhase::Anchoring;
                 state.phase_start_ms = now_millis;
                 println!("{:?} end GaugeResistance phase with min {:.3} max {:.3} Ohms ({} ms) ",
                 now_utc_dt.timestamp(), state.min_ohms_ewma, state.max_ohms_ewma, 
                 phase_duration_ms);
-                // set the "initial max" to the gauged minimum value
+                // set the "initial max" for next drive phase to the gauged minimum value
                 state.max_ohms_ewma = state.min_ohms_ewma;
             }
         }
@@ -477,17 +466,17 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
             else {
                 // increase the desired drive current until reported current diverges
-                new_drive_ma = state.target_drive_ma + 5.*MIN_DRIVE_CURRENT_INCR_MA;
+                new_drive_ma = state.target_drive_ma + 2.*MIN_DRIVE_CURRENT_INCR_MA;
             }
         }
         DrivePhase::Growth => {  
-            if dendrite_formed {
+            if dendrite_formed || phase_duration_ms > GROWTH_PHASE_DUR_MS {
                 // switch to dendrite preservation
                 state.drive_phase = DrivePhase::Dendrite;
                 state.phase_start_ms = now_millis;
-                println!("{:?} end Growth phase with V {:.2} R {:.2} dR/dt {:.3} ({} ms)", 
+                println!("{:?} end Growth phase with V {:.2} Rew {:.2} dR/dt {:.3} ({} ms)", 
                     now_utc_dt.timestamp(), state.measured_volts, 
-                    state.inter_electrode_ohms, state.ohms_rate_ewma,
+                    state.ohms_ewma, state.ohms_rate_ewma,
                     phase_duration_ms
                 );
             }
@@ -495,7 +484,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Dendrite => {
             if state.inter_electrode_ohms < MIN_INTER_ELECTRODE_OHMS  {
                 // inter-electrode resistance is close to zero, indicating that the electrode-electrode gap has been bridged
-                state.drive_phase = DrivePhase::Cooldown;
+                state.drive_phase = DrivePhase::Holding;
                 state.phase_start_ms = now_millis;
                 println!("{:?} end Dendrite phase with V {:.2} R {:.2} dR/dt {:.3} ({} ms)", 
                     now_utc_dt.timestamp(), state.measured_volts, state.inter_electrode_ohms, state.ohms_rate_ewma,
@@ -506,8 +495,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 new_drive_ma = DENDRITE_CREEP_MA;
             }
         }
-        DrivePhase::Cooldown => {
-            new_drive_ma = COOLDOWN_PROBE_CURRENT_MA;
+        DrivePhase::Holding => {
+            new_drive_ma = HOLDING_PROBE_CURRENT_MA;
         }
         _ => {
         }
@@ -569,7 +558,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         control_furnace(&mut ctx, &mut furnace_state).await?;
         if furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C  ||
-            electrode_state.drive_phase == DrivePhase::Cooldown 
+            electrode_state.drive_phase == DrivePhase::Holding 
         {
             control_electrodes(&mut ctx, &mut electrode_state).await?;
         }
