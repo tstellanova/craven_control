@@ -92,7 +92,7 @@ fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
 async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 -> Result<(Option<f32>, Option<f32>), Box<dyn std::error::Error>> 
 {
-    sleep(MODBUS_RW_DELAY);
+    sleep(MODBUS_RW_DELAY).await;
     read_ykktc1202_dual_tk_temps(ctx).await
 }
 
@@ -104,7 +104,7 @@ async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
 -> Result<(f32, f32), Box<dyn std::error::Error>> 
 {
-    sleep(MODBUS_RW_DELAY);
+    sleep(MODBUS_RW_DELAY).await;
 //    read_ykdaq1402_iv_adc(ctx).await
 
   let potential  = read_wa8tai_iv(ctx,1).await?;
