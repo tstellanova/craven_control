@@ -32,7 +32,7 @@ const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = AVG_PKPK_HEAT_CYCLE_MS;
 /// Time limit for growth phase
 const GROWTH_PHASE_DUR_MS: u64 = 4*AVG_PKPK_HEAT_CYCLE_MS;
 /// Time limit for minimum resistance to drop during Growth phase
-const GROWTH_PHASE_MINR_LIMIT_MS: u64 = (5*AVG_HEAT_CYCLE_DURATION_SEC)/2;
+const GROWTH_PHASE_MINR_LIMIT_MS: u64 = (5*AVG_PKPK_HEAT_CYCLE_MS)/2;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -579,7 +579,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         writeln!(  csv_writer,"{}",  log_line)?;
         loop_count = (loop_count + 1) % 10;
         if loop_count == 0 { csv_writer.flush(); }
-        
+
         // Attempt to sync to about 1 Hz measurements
         sleep_until(next_run_instant).await;
     }
