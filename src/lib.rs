@@ -212,7 +212,7 @@ pub async fn read_wa8tai_volts_milliamps(ctx: &mut tokio_modbus::client::Context
 {
     ctx.set_slave(Slave(NODEID_WA8TAI_IV_ADC)); 
     let resp: Vec<u16> = ctx.read_input_registers(0x0000, 2).await??; //read all 8 at once
-    println!("AIN resp: {resp:?}");
+    // println!("AIN resp: {resp:?}");
     let volts = (resp[0] as f32) / 1E3; // original value is millivolts
     let milliamps =  (resp[1] as f32) / 1E3; //output range 4000~20000, unit uA;
 
