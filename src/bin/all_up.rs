@@ -19,9 +19,10 @@ use craven_control::*;
 
 
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
-const MODBUS_RW_DELAY: Duration = Duration::from_millis(25);
-const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
-const HOLD_ZERO_PULSE_TIME:Duration = Duration::from_millis(50);
+const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
+// const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
+const CURRENT_PULSE_ON_TIME: Duration = Duration::from_millis(50);
+const CURRENT_PULSE_OFF_TIME: Duration = Duration::from_millis(100);
 
 /// Average peak-to-peak interval for heating after warmup
 const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 260;
@@ -57,7 +58,7 @@ const STABLE_DENDRITE_OHMS: f32 = 20.;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
-const PLATEAU_CURRENT_GAP_MA: f32 = 12.0;
+const PLATEAU_CURRENT_GAP_MA: f32 = 16.0;
 
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
@@ -76,7 +77,6 @@ const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
 const MAX_AMMETER_VAL: f32 = 20.0;
 
 
-
 /// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
 const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
 
@@ -88,9 +88,9 @@ fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
     *ewma = alpha * new_value + (1.0 - alpha) * *ewma;
 }
 
-/**
- * Read the dual thermocouple reader
- */
+/// 
+/// Read the dual thermocouple ADC
+/// 
 async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 -> Result<(Option<f32>, Option<f32>), Box<dyn std::error::Error>> 
 {
@@ -99,35 +99,29 @@ async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 }
 
 
-/**
- * Read the voltage across and current through active electrode pair.
- * 
- */
+/// 
+/// Read the voltage across and current through active electrode pair.
+/// 
 async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
 -> Result<(f32, f32), Box<dyn std::error::Error>> 
 {
     sleep(MODBUS_RW_DELAY).await;
-//    read_ykdaq1402_iv_adc(ctx).await
-
-  let potential  = read_wa8tai_iv(ctx,1).await?;
-  let current = read_wa8tai_iv(ctx,2).await?;
-
-  Ok((potential, current))
+    read_wa8tai_volts_milliamps(ctx).await
 }
 
-/**
- * Set the output drive current of the test electrodes 
- */
+ /// 
+ /// Set the output drive current of the test electrodes 
+ /// 
 async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<f32, Box<dyn std::error::Error>> 
 {
     sleep(MODBUS_RW_DELAY).await;
     set_ykpvccs0100_current_drive(ctx, milliamps).await
 }
 
-/**
- * Verify that all the modules we expect to be connected to the RS-485 Modbus are,
- * in fact, connected.
- */
+/// 
+/// Verify that all the modules we expect to be connected to the RS-485 Modbus are,
+/// in fact, connected.
+/// 
 async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
 {
     // measures dual type K thermocouple signal
@@ -145,15 +139,15 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     Ok(())
 }
 
-fn current_from_current_density_ma(density_ma_cm2: f64, wire_od_mm: f64, wire_len_mm: f64) -> f32 
-{
-    // Surface Area = PI * diameter * length 
-    // For 0.8 mm OD, 10 mm long, outer cylinder SA = 0.251 cm2
-    // 200 mA/cm2 * 0.251 = 50.265 mA
-    // For 0.8 mm OD,  3 mm long, SA = 0.024 cm2, current = 4.8 mA
-    let electrode_surface_area: f64 = std::f64::consts::PI * (wire_od_mm/10. * wire_len_mm/10.); 
-    (density_ma_cm2  * electrode_surface_area) as f32
-}
+// fn current_from_current_density_ma(density_ma_cm2: f64, wire_od_mm: f64, wire_len_mm: f64) -> f32 
+// {
+//     // Surface Area = PI * diameter * length 
+//     // For 0.8 mm OD, 10 mm long, outer cylinder SA = 0.251 cm2
+//     // 200 mA/cm2 * 0.251 = 50.265 mA
+//     // For 0.8 mm OD,  3 mm long, SA = 0.024 cm2, current = 4.8 mA
+//     let electrode_surface_area: f64 = std::f64::consts::PI * (wire_od_mm/10. * wire_len_mm/10.); 
+//     (density_ma_cm2  * electrode_surface_area) as f32
+// }
 
 #[repr(u8)]
 #[derive(Debug, Clone, PartialEq)]
@@ -172,9 +166,9 @@ enum DrivePhase {
     Holding = 5, 
 } 
 
-/**
- * Redirect furnace on/off to actual modbus device.
- */
+ /// 
+ /// Redirect furnace on/off to actual modbus device.
+ /// 
 async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
 -> Result<(), Box<dyn std::error::Error>> 
 {
@@ -183,9 +177,7 @@ async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
     Ok(())
 }
 
-/**
- * Shut off the furnace heater, shut off any current drive.
- */
+/// Shut off the furnace heater, shut off any current drive.
 async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
 -> Result<(), Box<dyn std::error::Error>> 
 {
@@ -213,14 +205,14 @@ pub struct FurnaceState {
 
 const INITIAL_FURNACE_STATE: FurnaceState = FurnaceState  { 
         prior_max_temp_c: 0., 
-        setpoint_c: PROBE_CHECK_TEMP_C, /// Heat until we can attempt probe insertion into melt
+        setpoint_c: PROBE_CHECK_TEMP_C, 
         measured_temp_c: 0., 
         heater_on: false 
     };
 
-/**
- * Turn the furnace heating on/off based on setpoint and temperature
- */
+///
+/// Turn the furnace heating on/off based on setpoint and temperature
+/// 
 async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut FurnaceState) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
@@ -297,20 +289,27 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
 pub struct ElectrodeState {
     drive_phase: DrivePhase,
     last_update_ms: i64,
+    /// Time at which this drive phase started
     phase_start_ms: i64,
-    inter_electrode_ohms: f32,
+    /// Measured inter-electrode resistance (or infinite)
+    measured_ohms: f32,
     /// Exponential moving average of inter-electrode resistance
     ohms_ewma: f32,
     /// Minimum of ohms EWMA
     min_ohms_ewma: f32,
+    /// The last time the min_ohms_ewma changed
     minr_update_ms: i64,
     /// Maximum value of inter-electrode resistance at start of growth phase
     max_ohms_ewma: f32,
     /// Exponential moving average of the rate of change (dR/dt) of inter-electrode resistance
     ohms_rate_ewma: f32,
+    /// The drive current to send to the electrodes
     target_drive_ma: f32,
+    /// The actual drive current reported by the current source
     reported_drive_ma: f32,
+    /// The actual measured drive currrent (may be same as reported_drive_ma above 20 mA) 
     measured_ma: f32,
+    /// The actual measeured potential across the electrodes 
     measured_volts: f32,
 }
 
@@ -320,67 +319,119 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             drive_phase:DrivePhase::Warmup,
             last_update_ms:0,
             phase_start_ms:0,
-            inter_electrode_ohms:INF_INTER_ELECTRODE_OHMS,
+            measured_ohms:INF_INTER_ELECTRODE_OHMS,
             ohms_ewma:0.,
             min_ohms_ewma: INF_INTER_ELECTRODE_OHMS,
             minr_update_ms:0,
             max_ohms_ewma: 0.,
             ohms_rate_ewma:0.,
-            target_drive_ma:0.,
+            target_drive_ma: MIN_DRIVE_CURRENT_INCR_MA,
             reported_drive_ma:0.,
             measured_ma:0.,
             measured_volts:0., 
         }; 
-/**
- * Adjust the electrode current based on melt condition and drive phase
- */
-async fn control_electrodes(ctx: &mut tokio_modbus::client::Context, 
-    state: &mut ElectrodeState,
-) 
--> Result<(), Box<dyn std::error::Error>> 
+
+
+///  
+/// Send one current drive pulse to the electrodes,
+///  consisting of a drive to a positive potential for high_time, 
+///  followed by holding zero DC for a measured low_time.
+///
+///  Note that after this function returns,
+///  the output drive current should be ZERO.
+/// 
+async fn drive_one_pulse(ctx: &mut tokio_modbus::client::Context,
+    state: &mut ElectrodeState, high_time: Duration, low_time: Duration,
+)
+-> Result<(f32, f32, f32), Box<dyn std::error::Error>> 
 {
-    let mut now_utc_dt = chrono::Utc::now();
-    let mut now_millis = now_utc_dt.timestamp_millis();
-    let mut drive_duration_ms: u64 = if state.last_update_ms <  now_millis { ( now_millis - state.last_update_ms) as u64 } else { 1 };
+    let mut start_pulse_utc_dt = chrono::Utc::now();
+    let mut start_pulse_millis = start_pulse_utc_dt.timestamp_millis();
 
-
-    let drive_duration_sec = (drive_duration_ms as f32)/1000.;
-    let phase_duration_ms = if state.phase_start_ms <  now_millis { (now_millis - state.phase_start_ms) as u64 } else { 0 };
-
-    // reuse old drive current until instructed otherwise
-    let mut new_drive_ma: f32 = state.target_drive_ma;
-    
-    let (elecm_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
-    let measured_electrode_ma: f32 = 
-        if state.target_drive_ma > 0. {
-            if elecm_volts < OPEN_CIRCUIT_VOLTS {
-                if state.reported_drive_ma < MAX_AMMETER_VAL && elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma }
-                else { state.reported_drive_ma }
-            } else { 0. }
+    // Drive output current pulse based on prior settings, and measure result
+    state.reported_drive_ma = set_electrode_current_drive(ctx, state.target_drive_ma).await?;
+    sleep(high_time).await;
+    // Measure the resulting induced current and potential across the electrodes
+    let (measured_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
+    let measured_milliamps: f32 = 
+        if state.target_drive_ma > 0.  && measured_volts < OPEN_CIRCUIT_VOLTS {
+            if state.reported_drive_ma < MAX_AMMETER_VAL && elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma }
+            else { state.reported_drive_ma }
         }  else { 0. };
-    let inter_electrode_ohms = 
-        if measured_electrode_ma > 0. {
+    let measured_ohms = 
+        if measured_milliamps > 0. {
             // this also covers the case where volts = 0.0, i.e. zero resistance.
-            (1000. * elecm_volts) / measured_electrode_ma 
+            (1000. * measured_volts) / measured_milliamps 
         }
         else {
             INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
         };
 
+    let mut end_drive_utc_dt = chrono::Utc::now();
+    let mut end_drive_millis = start_pulse_utc_dt.timestamp_millis();
+    set_electrode_current_drive(ctx, 0.).await?;
+    sleep(low_time).await;
 
+    return Ok((measured_volts, measured_milliamps, measured_ohms))
+
+}
+
+/// 
+/// Adjust the electrode current based on melt condition and drive phase
+/// 
+async fn control_electrodes(ctx: &mut tokio_modbus::client::Context, 
+    state: &mut ElectrodeState,
+) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    let mut start_drive_utc_dt = chrono::Utc::now();
+    let mut start_drive_ms = start_drive_utc_dt.timestamp_millis();
+
+    let mut sum_volts = 0.;
+    let mut sum_milliamps = 0.;
+    let mut sum_ohms = 0.;
+    const PULSES_PER_MAINLOOP: i32 = 3;
+    if state.target_drive_ma > 0. {
+        for _ in 0..PULSES_PER_MAINLOOP  {
+            // Drive output current pulse based on prior settings, and measure result
+            let (pulse_volts, pulse_milliamps, pulse_ohms) = 
+                drive_one_pulse(ctx, state, CURRENT_PULSE_ON_TIME, CURRENT_PULSE_OFF_TIME).await?;
+            sum_volts += pulse_volts;
+            sum_milliamps += pulse_milliamps;
+            sum_ohms += pulse_ohms;
+        }
+    }
+
+    // Average the pulse measurements
+    let measured_volts = sum_volts / (PULSES_PER_MAINLOOP as f32);
+    let measured_milliamps = sum_milliamps / (PULSES_PER_MAINLOOP as f32);
+    let measured_ohms = 
+        if measured_milliamps > 0. { sum_ohms / (PULSES_PER_MAINLOOP as f32) } else {INF_INTER_ELECTRODE_OHMS };
+
+    let mut end_drive_utc_dt = chrono::Utc::now();
+    let mut end_drive_ms = start_drive_utc_dt.timestamp_millis();
+    let mut drive_duration_ms = end_drive_ms - start_drive_ms;
+    let drive_duration_sec = (drive_duration_ms as f32)/1000.;
+    let phase_duration_ms = 
+        if state.phase_start_ms <  end_drive_ms {  (end_drive_ms - state.phase_start_ms) as u64 } 
+        else { 0 };
+
+    // reuse old drive current until instructed otherwise
+    let mut new_drive_ma: f32 = state.target_drive_ma;
+    
     // Check for significant drops in resistance
     let mut dendrite_formed = false;
-    if inter_electrode_ohms != INF_INTER_ELECTRODE_OHMS {
-        let dr_dt = (inter_electrode_ohms - state.ohms_ewma)/drive_duration_sec;
+    if measured_ohms != INF_INTER_ELECTRODE_OHMS   {
+        let dr_dt = (measured_ohms - state.ohms_ewma)/drive_duration_sec;
         update_ewma(&mut state.ohms_rate_ewma,dr_dt, DRDT_EWMA_ALPHA);
-        update_ewma(&mut state.ohms_ewma, inter_electrode_ohms, RESISTANCE_EWMA_ALPHA);
+        update_ewma(&mut state.ohms_ewma, measured_ohms, RESISTANCE_EWMA_ALPHA);
 
         // only evaluate minimum phase ohms when rate is not extreme 
         if state.ohms_rate_ewma.abs() < OHM_RATE_SETTLING_LIMIT  {
             if state.ohms_ewma < state.min_ohms_ewma {
                 println!("min_ohms_ewma old: {:.3} new: {:.3}", state.min_ohms_ewma, state.ohms_ewma);
                 state.min_ohms_ewma = state.ohms_ewma;
-                state.minr_update_ms = now_millis;
+                state.minr_update_ms = end_drive_ms;
                 if state.min_ohms_ewma < (state.max_ohms_ewma / 3.) {
                     dendrite_formed = true;
                 }
@@ -388,32 +439,18 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
     }
 
-    state.inter_electrode_ohms = inter_electrode_ohms;
-    state.measured_volts = elecm_volts;
-    state.measured_ma = measured_electrode_ma;
+    state.measured_ohms = measured_ohms;
+    state.measured_volts = measured_volts;
+    state.measured_ma = measured_milliamps;
 
     let reported_gap = state.target_drive_ma - state.reported_drive_ma;
-    let measured_gap = state.target_drive_ma - measured_electrode_ma;
+    let measured_gap = state.target_drive_ma - measured_milliamps;
 
     let current_gap: f32 = 
         if state.target_drive_ma >= PROBE_CURRENT_MA {
             measured_gap
         }
         else { 100. }; // outrageously large current gap
-
-    
-    // First shut off the current under certain circumstances
-    match state.drive_phase {
-        DrivePhase::Anchoring | DrivePhase::Growth | DrivePhase::GaugeResistance => {
-            // momentarily disable current
-            let probe_reported_ma = set_electrode_current_drive(ctx, 0.).await?;
-            if probe_reported_ma > MIN_DRIVE_CURRENT_INCR_MA {
-                println!("probe_reported_ma: {:.2}  > {:.2}",probe_reported_ma,MIN_DRIVE_CURRENT_INCR_MA);
-            }
-            sleep(HOLD_ZERO_PULSE_TIME).await;
-        }
-        _ => {  }
-    }
 
     // Then calculate any drive phase transitions
     match state.drive_phase {
@@ -423,9 +460,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 // the measured current is about the same as probe current
                 new_drive_ma = GAUGE_CURRENT_MA / 2.;
                 state.drive_phase = DrivePhase::GaugeResistance;
-                state.phase_start_ms = now_millis;
+                state.phase_start_ms = end_drive_ms;
                 state.min_ohms_ewma = INF_INTER_ELECTRODE_OHMS; //reset due to prior phase corruption
-                println!("{:?} start GaugeResistance phase ",now_utc_dt.timestamp());
+                println!("{:?} start GaugeResistance phase ",end_drive_utc_dt.timestamp());
             }
         }
         DrivePhase::GaugeResistance => {
@@ -436,9 +473,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             // continue probing over multiple heat/cool cycles to characterize resistance
             if phase_duration_ms > GAUGE_RESISTANCE_PHASE_DUR_MS {
                 state.drive_phase = DrivePhase::Anchoring;
-                state.phase_start_ms = now_millis;
+                state.phase_start_ms = end_drive_ms;
                 println!("{:?} end GaugeResistance phase with min {:.3} max {:.3} Ohms ({} ms) ",
-                now_utc_dt.timestamp(), state.min_ohms_ewma, state.max_ohms_ewma, 
+                end_drive_utc_dt.timestamp(), state.min_ohms_ewma, state.max_ohms_ewma, 
                 phase_duration_ms);
                 // set the "initial max" for next drive phase to the gauged minimum value
                 state.max_ohms_ewma = state.min_ohms_ewma;
@@ -448,12 +485,12 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             if reported_gap > PLATEAU_CURRENT_GAP_MA {
                 // the actual current has diverged from desired current
                 state.drive_phase = DrivePhase::Growth;
-                state.phase_start_ms = now_millis;
+                state.phase_start_ms = end_drive_ms;
                 state.ohms_rate_ewma = 0.; //reset because it's scrambled by prior descent
                 state.max_ohms_ewma = state.ohms_ewma;
-                state.minr_update_ms = now_millis;
+                state.minr_update_ms = end_drive_ms;
                 println!("{:?} end Anchoring phase with max {:.3} Ohms, target {:.3} mA vs reported {:.3} mA ({} ms)", 
-                    now_utc_dt.timestamp(), state.max_ohms_ewma, state.target_drive_ma, state.reported_drive_ma,
+                    end_drive_utc_dt.timestamp(), state.max_ohms_ewma, state.target_drive_ma, state.reported_drive_ma,
                     phase_duration_ms
                 );
             }
@@ -467,25 +504,25 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Growth => {  
-            let minr_drop_delay = if now_millis > state.minr_update_ms { now_millis - state.minr_update_ms } else { 0};
+            let minr_drop_delay = if end_drive_ms > state.minr_update_ms { end_drive_ms - state.minr_update_ms } else { 0};
             if minr_drop_delay > GROWTH_PHASE_MINR_LIMIT_MS as i64 {
                 // switch to dendrite preservation
                 state.drive_phase = DrivePhase::Dendrite;
-                state.phase_start_ms = now_millis;
+                state.phase_start_ms = end_drive_ms;
                 println!("{:?} end Growth phase with V {:.2} Rew {:.2} dR/dt {:.3} ({} ms)", 
-                    now_utc_dt.timestamp(), state.measured_volts, 
+                    end_drive_utc_dt.timestamp(), state.measured_volts, 
                     state.ohms_ewma, state.ohms_rate_ewma,
                     phase_duration_ms
                 );
             }
         }
         DrivePhase::Dendrite => {
-            if state.inter_electrode_ohms < MIN_INTER_ELECTRODE_OHMS  {
+            if state.measured_ohms < MIN_INTER_ELECTRODE_OHMS  {
                 // inter-electrode resistance is close to zero, indicating that the electrode-electrode gap has been bridged
                 state.drive_phase = DrivePhase::Holding;
-                state.phase_start_ms = now_millis;
+                state.phase_start_ms = end_drive_ms;
                 println!("{:?} end Dendrite phase with V {:.2} R {:.2} dR/dt {:.3} ({} ms)", 
-                    now_utc_dt.timestamp(), state.measured_volts, state.inter_electrode_ohms, state.ohms_rate_ewma,
+                    end_drive_utc_dt.timestamp(), state.measured_volts, state.measured_ohms, state.ohms_rate_ewma,
                     phase_duration_ms
                 );
             }
@@ -500,8 +537,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
     };
 
-    // Now, update the drive current for the remainder of the main loop duration
-    state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
+    // Now, update the drive current for the next main loop iteration
+    // state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
     state.target_drive_ma = new_drive_ma;
     state.last_update_ms = chrono::Utc::now().timestamp_millis();
 
@@ -530,8 +567,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_dmA,eleco_rmA,elecm_mA,elecm_V,elec_R,Rew,MinRew,dRdTew";
-    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.1},{:.1},{:.2},{:.3},{:.1},{:.2},{:.1},{:.3}" } }
+    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,MinRew,dRdTew";
+    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.1},,{:.2},{:.3},{:.1},{:.2},{:.1},{:.3}" } }
     
     println!("{}",CSV_HEADER);
     writeln!(csv_writer, "{}", CSV_HEADER)?;
@@ -570,9 +607,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             current_utc_dt.timestamp(),
             furnace_state.heater_on as u8,
             furnace_state.measured_temp_c,
-            electrode_state.target_drive_ma, electrode_state.reported_drive_ma, electrode_state.measured_ma,
+            electrode_state.target_drive_ma, electrode_state.measured_ma,
             electrode_state.measured_volts, 
-            electrode_state.inter_electrode_ohms, electrode_state.ohms_ewma, electrode_state.min_ohms_ewma,
+            electrode_state.measured_ohms, electrode_state.ohms_ewma, electrode_state.min_ohms_ewma,
             electrode_state.ohms_rate_ewma
         );
         println!("{}",log_line);

@@ -204,6 +204,22 @@ pub async fn read_wa8tai_iv(ctx: &mut tokio_modbus::client::Context, channel: u8
 }
 
 /**
+ * Read Waveshare WA8TAI 8CH analog IV ADC.
+ * Returns a value that is either milliamps or volts, depending on how the channel was configured
+ */
+pub async fn read_wa8tai_volts_milliamps(ctx: &mut tokio_modbus::client::Context)
+-> Result<(f32, f32), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_WA8TAI_IV_ADC)); 
+    let resp: Vec<u16> = ctx.read_input_registers(0x0000, 2).await??; //read all 8 at once
+    println!("AIN resp: {resp:?}");
+    let volts = (resp[0] as f32) / 1E3; // original value is millivolts
+    let milliamps =  (resp[1] as f32) / 1E3; //output range 4000~20000, unit uA;
+
+    Ok((volts, milliamps))
+}
+
+/**
  * Set the pyro simulator current loop controller (4-20 mA source) current value
  * Note: channel is 1-8
  */
