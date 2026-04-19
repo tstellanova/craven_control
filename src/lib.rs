@@ -57,6 +57,10 @@ pub const REG_NODEID_R4DVI04: u16 = 0x00FD;
 pub const REG_WA8TAI_BAUD: u16 = 0x2000; // get/set baud for WA8TAI, 0-7, ...19200, 38400, 57600, 115200, 128k, 256k max
 pub const REG_R4DVI04_BAUD: u16 = 0x00FE; // get/set baud for RDVI04, 0-7, ...19200, 38400, 57600, 115200 max
 
+pub const REG_YKPVCCS_DRIVE_MILLIAMPS: u16  = 0x10; // get/set drive mA for YK-PVCCS
+pub const REG_YKPVCCS_MONITOR_MILLIAMPS: u16  = 0x11; // read YK-PVCCS ammeter
+
+
 // /// Combine two u16 registers into amn f32
 // fn registers_to_f32(registers: &[u16], offset: usize) -> f32 {
 //     let high = registers[offset] as u32;
@@ -127,28 +131,26 @@ pub async fn read_ykdaq1402_iv_adc(ctx: &mut tokio_modbus::client::Context)
  * @return The reading of current
  */
 pub async fn set_ykpvccs0100_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) 
--> Result<f32, Box<dyn std::error::Error>> 
+-> Result<(), Box<dyn std::error::Error>> 
 {
-    const REG_ADDR_DRIVE_MILLIAMPS: u16  = 0x10;
-    const REG_ADDR_MONITOR_MILLIAMPS: u16  = 0x11;
-
-    // println!("set_precision_current_drive: {milliamps:?} mA");
-
     ctx.set_slave(Slave(NODEID_YKPVCCS010_CURR_SRC)); 
 
     // precision is 0.1 mA
     let out_ma_setting: u16 = (10.0 * milliamps).round() as u16;
     // println!("writing val of : {}", out_ma_setting);
-    ctx.write_single_register(REG_ADDR_DRIVE_MILLIAMPS, out_ma_setting).await??;
+    ctx.write_single_register(REG_YKPVCCS_DRIVE_MILLIAMPS, out_ma_setting).await??;
 
+    Ok(())
+}    
 
-    sleep(Duration::from_millis(125)).await; // TODO sufficient settling time?
-    let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_ADDR_MONITOR_MILLIAMPS, 1).await??;
+pub async fn read_ykpvccs0100_current_drive(ctx: &mut tokio_modbus::client::Context)
+-> Result<f32, Box<dyn std::error::Error>> 
+
+{
+    let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_YKPVCCS_MONITOR_MILLIAMPS, 1).await??;
     let actual_ma = (read_rsp[0] as f32)/10.0;// precision is 0.1 mA
-
-
     Ok(actual_ma)
-}    // ping_one_modbus_node_id(ctx,NODEID_N4AIA04_IV_ADC, REG_NODEID_N4AIA04).await?;
+}
 
 
 pub async fn read_n4via02_multimeter(ctx: &mut tokio_modbus::client::Context)

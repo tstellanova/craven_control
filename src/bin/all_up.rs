@@ -20,9 +20,9 @@ use craven_control::*;
 
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
 const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
-// const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
-const CURRENT_PULSE_ON_TIME: Duration = Duration::from_millis(150);
-const CURRENT_PULSE_OFF_TIME: Duration = Duration::from_millis(50); //TODO actually unused
+const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
+const CURRENT_PULSE_ON_TIME: Duration = CURRENT_SOURCE_STABILIZATION_TIME; 
+const CURRENT_PULSE_OFF_TIME: Duration = CURRENT_SOURCE_STABILIZATION_TIME;
 
 /// Average peak-to-peak interval for heating after warmup
 const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 260;
@@ -94,7 +94,6 @@ fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
 async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 -> Result<(Option<f32>, Option<f32>), Box<dyn std::error::Error>> 
 {
-    sleep(MODBUS_RW_DELAY).await;
     read_ykktc1202_dual_tk_temps(ctx).await
 }
 
@@ -105,16 +104,14 @@ async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
 -> Result<(f32, f32), Box<dyn std::error::Error>> 
 {
-    // sleep(MODBUS_RW_DELAY).await;
     read_wa8tai_volts_milliamps(ctx).await
 }
 
  /// 
  /// Set the output drive current of the test electrodes 
  /// 
-async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<f32, Box<dyn std::error::Error>> 
+async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<(), Box<dyn std::error::Error>> 
 {
-    // sleep(MODBUS_RW_DELAY).await;
     set_ykpvccs0100_current_drive(ctx, milliamps).await
 }
 
@@ -345,13 +342,12 @@ async fn drive_one_pulse(ctx: &mut tokio_modbus::client::Context,
 )
 -> Result<(f32, f32, f32), Box<dyn std::error::Error>> 
 {
-    let mut start_pulse_utc_dt = chrono::Utc::now();
-    let mut start_pulse_millis = start_pulse_utc_dt.timestamp_millis();
-
     // Drive output current pulse based on prior settings, and measure result
-    state.reported_drive_ma = set_electrode_current_drive(ctx, state.target_drive_ma).await?;
+    set_electrode_current_drive(ctx, state.target_drive_ma).await?;
     sleep(high_time).await;
+
     // Measure the resulting induced current and potential across the electrodes
+    state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
     let (measured_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
     let measured_milliamps: f32 = 
         if state.target_drive_ma > 0.  && measured_volts < OPEN_CIRCUIT_VOLTS {
@@ -367,8 +363,7 @@ async fn drive_one_pulse(ctx: &mut tokio_modbus::client::Context,
             INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
         };
 
-    let mut end_drive_utc_dt = chrono::Utc::now();
-    let mut end_drive_millis = start_pulse_utc_dt.timestamp_millis();
+    // zero output after pulse
     set_electrode_current_drive(ctx, 0.).await?;
     sleep(low_time).await;
 
@@ -390,7 +385,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let mut sum_volts = 0.;
     let mut sum_milliamps = 0.;
     let mut sum_ohms = 0.;
-    const PULSES_PER_MAINLOOP: i32 = 2;
+    const PULSES_PER_MAINLOOP: i32 = 4;
+    const PULSES_AVG_FACTOR: f32 = (PULSES_PER_MAINLOOP as f32);
     if state.target_drive_ma > 0. {
         for _ in 0..PULSES_PER_MAINLOOP  {
             // Drive output current pulse based on prior settings, and measure result
@@ -400,18 +396,20 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             sum_milliamps += pulse_milliamps;
             sum_ohms += pulse_ohms;
         }
-    }
+    } 
     
     let mut end_drive_utc_dt = chrono::Utc::now();
     let mut end_drive_ms = end_drive_utc_dt.timestamp_millis();
     let mut drive_duration_ms = end_drive_ms - start_drive_ms;
-    // println!("drive_duration_ms: {}",drive_duration_ms);
+    if drive_duration_ms > 1000 {
+        println!("drive_duration_ms: {} / {} = {} ms per pulse",drive_duration_ms, PULSES_PER_MAINLOOP, drive_duration_ms/(PULSES_PER_MAINLOOP as i64));
+    }
 
     // Average the pulse measurements
-    let measured_volts = sum_volts / (PULSES_PER_MAINLOOP as f32);
-    let measured_milliamps = sum_milliamps / (PULSES_PER_MAINLOOP as f32);
+    let measured_volts = sum_volts / PULSES_AVG_FACTOR;
+    let measured_milliamps = sum_milliamps / PULSES_AVG_FACTOR;
     let measured_ohms = 
-        if measured_milliamps > 0. { sum_ohms / (PULSES_PER_MAINLOOP as f32) } else {INF_INTER_ELECTRODE_OHMS };
+        if measured_milliamps > 0. { sum_ohms / PULSES_AVG_FACTOR } else {INF_INTER_ELECTRODE_OHMS };
 
     let drive_duration_sec = (drive_duration_ms as f32)/1000.;
     let phase_duration_ms = 
@@ -587,6 +585,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut furnace_state = INITIAL_FURNACE_STATE;
     let mut electrode_state =  INITIAL_ELECTRODE_STATE;
+    electrode_state.phase_start_ms =  chrono::Utc::now().timestamp_millis();
 
     let mut loop_count = 0;
     while running.load(Ordering::SeqCst) { 
@@ -595,15 +594,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let next_run_instant = current_instant + INTER_LOOP_DELAY;
 
         control_furnace(&mut ctx, &mut furnace_state).await?;
-        if furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C  ||
-            electrode_state.drive_phase == DrivePhase::Holding 
-        {
-            control_electrodes(&mut ctx, &mut electrode_state).await?;
-        }
-        else {
-            electrode_state = INITIAL_ELECTRODE_STATE;
-            electrode_state.phase_start_ms = current_utc_dt.timestamp_millis();
-        }
+        control_electrodes(&mut ctx, &mut electrode_state).await?;
+
+        // if furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C  ||
+        //     electrode_state.drive_phase == DrivePhase::Holding 
+        // {
+        //     control_electrodes(&mut ctx, &mut electrode_state).await?;
+        // }
+        // else {
+        //     electrode_state = INITIAL_ELECTRODE_STATE;
+        //     electrode_state.phase_start_ms = current_utc_dt.timestamp_millis();
+        // }
 
         let log_line = format!( CSV_LINE_FORMAT!(),
             current_utc_dt.timestamp(),
