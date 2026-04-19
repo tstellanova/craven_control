@@ -456,7 +456,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     match state.drive_phase {
         DrivePhase::Warmup => {
             new_drive_ma = PROBE_CURRENT_MA * 2.;
-            if current_gap < 0.2 {
+            if current_gap < 0.7 {
                 // the measured current is about the same as probe current
                 new_drive_ma = GAUGE_CURRENT_MA / 2.;
                 state.drive_phase = DrivePhase::GaugeResistance;
@@ -594,17 +594,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let next_run_instant = current_instant + INTER_LOOP_DELAY;
 
         control_furnace(&mut ctx, &mut furnace_state).await?;
-        control_electrodes(&mut ctx, &mut electrode_state).await?;
 
-        // if furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C  ||
-        //     electrode_state.drive_phase == DrivePhase::Holding 
-        // {
-        //     control_electrodes(&mut ctx, &mut electrode_state).await?;
-        // }
-        // else {
-        //     electrode_state = INITIAL_ELECTRODE_STATE;
-        //     electrode_state.phase_start_ms = current_utc_dt.timestamp_millis();
-        // }
+        if furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C  ||
+            electrode_state.drive_phase == DrivePhase::Holding 
+        {
+            control_electrodes(&mut ctx, &mut electrode_state).await?;
+        }
+        else {
+            electrode_state = INITIAL_ELECTRODE_STATE;
+            electrode_state.phase_start_ms = current_utc_dt.timestamp_millis();
+        }
 
         let log_line = format!( CSV_LINE_FORMAT!(),
             current_utc_dt.timestamp(),
