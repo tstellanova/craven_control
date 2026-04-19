@@ -42,6 +42,7 @@ pub const REG_NODEID_N4VIA02: u16 = 0xFD; // 0-1 Amp ADC
 pub const REG_NODEID_N4AIA04: u16 = 0x0E; // 4-20 mA ADC
 pub const REG_NODEID_YKPVCCS010_CURR_SRC:u16 = 0x00; // Precision current source YK-PVCCS0100/YK-PVCC1000
 pub const REG_SAVE_CFG_YKPVCCS010_CURR_SRC:u16 = 0x02; // Cause YK-PVCCS to persist its parameters.
+pub const REG_YKPVCCS_BAUD: u16 = 0x0001; // get/set baud for YK-PVCCS models, 0-6 ...19200, 38400, 57600, 115200 max
 pub const REG_IV_ADC_2CH_VALS: u16 = 0x00; // Where 2CH IV ADC stores read values
 pub const REG_N4VIA02_CURR_VALS: u16 = 0x0000; // Where N4VIA02 stores two current values
 pub const REG_N4VIA02_VOLT_VALS: u16 = 0x0020; // Where N4VIA02 stores two voltage values
@@ -50,8 +51,11 @@ pub const REG_NODEID_WAVESHARE_V2:u16 = 0x4000; // TODO ensure this value is set
 pub const REG_N4IOA01_CURR_VAL: u16 = 0x00;
 pub const REG_YKKTC1202_TEMP_VALS: u16 = 0x00; // The dual RTK's temperature values
 pub const REG_YKKTC1202_VALIDITY: u16 = 0x10; // The dual RTK's thermocouple connection state
+pub const REG_YKKTC1202_BAUD: u16 = 0x0021; // get/set baud for YKKTC1202, 0-6,  ...19200, 38400, 57600, 115200 max
 pub const REG_N4AIA04_CH1_CURR: u16 = 0x0002;
 pub const REG_NODEID_R4DVI04: u16 = 0x00FD;
+pub const REG_WA8TAI_BAUD: u16 = 0x2000; // get/set baud for WA8TAI, 0-7, ...19200, 38400, 57600, 115200, 128k, 256k max
+pub const REG_R4DVI04_BAUD: u16 = 0x00FE; // get/set baud for RDVI04, 0-7, ...19200, 38400, 57600, 115200 max
 
 // /// Combine two u16 registers into amn f32
 // fn registers_to_f32(registers: &[u16], offset: usize) -> f32 {
@@ -77,15 +81,20 @@ pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
 pub async fn ping_one_modbus_node_id(ctx: &mut tokio_modbus::client::Context, node_id: u8,  reg_node_id: u16) 
     -> Result<(), Box<dyn std::error::Error>>
 {
-    println!("Read existing node ID from node {node_id:X?}, reg 0x{reg_node_id:X?} ... ");
+    println!("Read node ID from node {node_id:X?}, reg 0x{reg_node_id:X?} ... ");
     ctx.set_slave(Slave(node_id));
+    sleep(Duration::from_millis(50)).await;
+
     let read_rsp: Vec<u16> = ctx.read_holding_registers(reg_node_id, 1).await??;
-    println!("> read_rsp: {:?}", read_rsp);
+    // println!("> read_rsp: {:?}", read_rsp);
 
     let existing_node_id = read_rsp[0] as u8;
     if existing_node_id != node_id {
         println!("Node ID {node_id:X?} reports node ID of {existing_node_id:X?}");
         panic!("Couldn't verify the old node ID");
+    }
+    else {
+        println!("Node ID {node_id:X?} verified");
     }
 
     Ok(())
@@ -189,7 +198,7 @@ pub async fn read_n4aia04_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
  * Read Waveshare WA8TAI 8CH analog IV ADC.
  * Returns a value that is either milliamps or volts, depending on how the channel was configured
  */
-pub async fn read_wa8tai_iv(ctx: &mut tokio_modbus::client::Context, channel: u8)
+pub async fn read_wa8tai_one_channel(ctx: &mut tokio_modbus::client::Context, channel: u8)
 -> Result<f32, Box<dyn std::error::Error>> 
 {
     let chan_offset = channel - 1; 

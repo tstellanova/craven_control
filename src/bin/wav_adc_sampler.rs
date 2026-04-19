@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     for i in 0..10 {
         sleep(Duration::from_millis(500)).await;
-        let _val = read_wa8tai_iv(&mut ctx, 4).await?;
+        let _val = read_wa8tai_one_channel(&mut ctx, 4).await?;
         // println!("test  value: {val:?}");
     }
     ctx.disconnect().await?;
