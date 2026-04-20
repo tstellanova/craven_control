@@ -404,7 +404,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let mut end_drive_utc_dt = chrono::Utc::now();
     let mut end_drive_ms = end_drive_utc_dt.timestamp_millis();
     let mut drive_duration_ms = end_drive_ms - start_drive_ms;
-    if drive_duration_ms > 1000 {
+    if drive_duration_ms > (300 * PULSES_PER_MAINLOOP).into()  {
         println!("drive_duration_ms: {} / {} = {} ms per pulse",drive_duration_ms, PULSES_PER_MAINLOOP, drive_duration_ms/(PULSES_PER_MAINLOOP as i64));
     }
 
@@ -423,7 +423,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let mut new_drive_ma: f32 = state.target_drive_ma;
     
     // Check for significant drops in resistance
-    let mut dendrite_formed = false;
     if measured_ohms != INF_INTER_ELECTRODE_OHMS   {
         let dr_dt = if state.measured_ohms != INF_INTER_ELECTRODE_OHMS {  (measured_ohms - state.measured_ohms) } else {2. * OHM_RATE_SETTLING_LIMIT };
         update_ewma(&mut state.ohms_rate_ewma,dr_dt, DRDT_EWMA_ALPHA);
@@ -435,10 +434,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 println!("min_ohms_ewma old: {:.3} new: {:.3}", state.min_ohms_ewma, state.ohms_ewma);
                 state.min_ohms_ewma = state.ohms_ewma;
                 state.minr_update_ms = end_drive_ms;
-                if state.min_ohms_ewma < (state.max_ohms_ewma / 3.) {
-                    println!("{} dendrite detected",end_drive_utc_dt.timestamp());
-                    dendrite_formed = true;
-                }
             }
         }
     }
@@ -478,7 +473,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             if phase_duration_ms > GAUGE_RESISTANCE_PHASE_DUR_MS {
                 state.drive_phase = DrivePhase::Anchoring;
                 state.phase_start_ms = end_drive_ms;
-                println!("{} end GaugeResistance phase,s min {:.3} max {:.3} Ohms ({} ms) ",
+                println!("{} end GaugeResistance phase: Ohms min {:.3} max {:.3} Ohms ({} ms) ",
                 end_drive_utc_dt.timestamp(), state.min_ohms_ewma, state.max_ohms_ewma, 
                 phase_duration_ms);
                 // reset min-max for next phase
