@@ -436,6 +436,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.min_ohms_ewma = state.ohms_ewma;
                 state.minr_update_ms = end_drive_ms;
                 if state.min_ohms_ewma < (state.max_ohms_ewma / 3.) {
+                    println!("{} dendrite detected",end_drive_utc_dt.timestamp());
                     dendrite_formed = true;
                 }
             }
@@ -477,7 +478,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             if phase_duration_ms > GAUGE_RESISTANCE_PHASE_DUR_MS {
                 state.drive_phase = DrivePhase::Anchoring;
                 state.phase_start_ms = end_drive_ms;
-                println!("{:?} end GaugeResistance phase,s min {:.3} max {:.3} Ohms ({} ms) ",
+                println!("{} end GaugeResistance phase,s min {:.3} max {:.3} Ohms ({} ms) ",
                 end_drive_utc_dt.timestamp(), state.min_ohms_ewma, state.max_ohms_ewma, 
                 phase_duration_ms);
                 // reset min-max for next phase
@@ -493,7 +494,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.ohms_rate_ewma = 0.; //reset because it's scrambled by prior descent
                 state.max_ohms_ewma = state.ohms_ewma;
                 state.minr_update_ms = end_drive_ms;
-                println!("{:?} end Anchoring phase with max {:.3} Ohms, target {:.3} mA vs reported {:.3} mA ({} ms)", 
+                println!("{} end Anchoring phase with max {:.3} Ohms, target {:.3} mA vs reported {:.3} mA ({} ms)", 
                     end_drive_utc_dt.timestamp(), state.max_ohms_ewma, state.target_drive_ma, state.reported_drive_ma,
                     phase_duration_ms
                 );
@@ -525,7 +526,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 // inter-electrode resistance is close to zero, indicating that the electrode-electrode gap has been bridged
                 state.drive_phase = DrivePhase::Holding;
                 state.phase_start_ms = end_drive_ms;
-                println!("{:?} end Dendrite phase with V {:.2} R {:.2} dR/dt {:.3} ({} ms)", 
+                println!("{} end Dendrite phase with V {:.2} R {:.2} dR/dt {:.3} ({} ms)", 
                     end_drive_utc_dt.timestamp(), state.measured_volts, state.measured_ohms, state.ohms_rate_ewma,
                     phase_duration_ms
                 );
@@ -594,14 +595,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut loop_count = 0;
 
     // First run main loop at next second
-    let now_instant = tokio::time::Instant::now();
-    let next_second = now_instant + Duration::from_secs(1) - Duration::from_millis(now_instant.elapsed().subsec_millis() as u64);
-    sleep_until(next_second).await;
+    let mut now_instant = tokio::time::Instant::now();
+    let first_loop_instant = now_instant + INTER_LOOP_DELAY - Duration::from_millis(now_instant.elapsed().subsec_millis() as u64);
+    sleep_until(first_loop_instant).await;
 
     while running.load(Ordering::SeqCst) { 
-        let current_instant = tokio::time::Instant::now();
+        now_instant = tokio::time::Instant::now();
         let current_utc_dt = chrono::Utc::now();
-        let next_run_instant = current_instant + INTER_LOOP_DELAY;
+        let next_run_instant = now_instant + INTER_LOOP_DELAY - Duration::from_millis(now_instant.elapsed().subsec_millis() as u64);
 
         control_furnace(&mut ctx, &mut furnace_state).await?;
 
