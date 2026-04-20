@@ -42,7 +42,10 @@ const PROBE_CHECK_TEMP_C:f32 = 550.;
 /// Temp we expect to see when probe is succesfully inserted into melt
 const PROBE_INSERTED_TEMP_C:f32 = 600.;
 /// The center temperature we are trying to achieve for the electrolyte melt
-const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
+const ELECTROLYTE_TARGET_TEMP_C:f32 = 775.;
+/// Above this temperature the furnace heat is out of control
+const EXCESSIVE_HEAT_TEMP_C:f32 = 800.;
+
 
 /// If the electrodes were shorted together at room temperature, what resistance do we expect?
 const MIN_INTER_ELECTRODE_OHMS: f32 = 19.;
@@ -474,11 +477,12 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             if phase_duration_ms > GAUGE_RESISTANCE_PHASE_DUR_MS {
                 state.drive_phase = DrivePhase::Anchoring;
                 state.phase_start_ms = end_drive_ms;
-                println!("{:?} end GaugeResistance phase with min {:.3} max {:.3} Ohms ({} ms) ",
+                println!("{:?} end GaugeResistance phase,s min {:.3} max {:.3} Ohms ({} ms) ",
                 end_drive_utc_dt.timestamp(), state.min_ohms_ewma, state.max_ohms_ewma, 
                 phase_duration_ms);
-                // set the "initial max" for next drive phase to the gauged minimum value
-                state.max_ohms_ewma = state.min_ohms_ewma;
+                // reset min-max for next phase
+                state.min_ohms_ewma = state.ohms_ewma;
+                state.max_ohms_ewma = state.ohms_ewma;
             }
         }
         DrivePhase::Anchoring => { 
@@ -588,6 +592,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     electrode_state.phase_start_ms =  chrono::Utc::now().timestamp_millis();
 
     let mut loop_count = 0;
+
+    // First run main loop at next second
+    let now_instant = tokio::time::Instant::now();
+    let next_second = now_instant + Duration::from_secs(1) - Duration::from_millis(now_instant.elapsed().subsec_millis() as u64);
+    sleep_until(next_second).await;
+
     while running.load(Ordering::SeqCst) { 
         let current_instant = tokio::time::Instant::now();
         let current_utc_dt = chrono::Utc::now();
@@ -595,7 +605,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         control_furnace(&mut ctx, &mut furnace_state).await?;
 
-        if furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C  ||
+        if (furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C && 
+            furnace_state.measured_temp_c < EXCESSIVE_HEAT_TEMP_C) ||
             electrode_state.drive_phase == DrivePhase::Holding 
         {
             control_electrodes(&mut ctx, &mut electrode_state).await?;
