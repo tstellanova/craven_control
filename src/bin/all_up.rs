@@ -70,7 +70,7 @@ const STABLE_DENDRITE_OHMS: f32 = 20.;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
-const PLATEAU_CURRENT_GAP_MA: f32 = 16.0;
+const PLATEAU_CURRENT_GAP_MA: f32 = 18.0;
 
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 10.; 
@@ -439,7 +439,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         // only evaluate minimum phase ohms when rate is not extreme 
         if state.ohms_rate_ewma.abs() < OHM_RATE_SETTLING_LIMIT  {
             if state.ohms_ewma < state.min_ohms_ewma {
-                println!("min_ohms_ewma old: {:.3} new: {:.3}", state.min_ohms_ewma, state.ohms_ewma);
+                println!("minR {:.3} -> {:.3}", state.min_ohms_ewma, state.ohms_ewma);
                 state.min_ohms_ewma = state.ohms_ewma;
                 state.minr_update_ms = end_drive_ms;
             }
@@ -506,7 +506,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 // slow down the rate of increasing current
                 new_drive_ma = state.target_drive_ma + MIN_DRIVE_CURRENT_INCR_MA;
             }
-            else {
+            else if reported_gap > 0. {
                 // increase the desired drive current until reported current diverges
                 new_drive_ma = state.target_drive_ma + 2.*MIN_DRIVE_CURRENT_INCR_MA;
             }
@@ -654,6 +654,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     csv_writer.flush()?;
 
     // Attempt to shut off all outputs before exiting
+    ctx.disconnect().await?;
+    println!("Reconnecting to: '{socket_addr:?}'");
+    let mut ctx: client::Context = tcp::connect(socket_addr).await?;
     zero_control_outputs(&mut ctx).await?;
     ctx.disconnect().await?;
 
