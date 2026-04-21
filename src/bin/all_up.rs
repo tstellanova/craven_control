@@ -31,7 +31,7 @@ const CURRENT_PULSE_ON_TIME: Duration = Duration::from_millis(50);
 const CURRENT_PULSE_OFF_TIME: Duration = Duration::from_millis(5);
 
 /// Average peak-to-peak interval for heating after warmup
-const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 260;
+const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 250;
 const AVG_PKPK_HEAT_CYCLE_MS: u64 = AVG_HEAT_CYCLE_DURATION_SEC * 1000;
 
 /// Time limite for inter-electrode resistance gauging phase
@@ -69,8 +69,16 @@ const DENDRITE_OHM_RATE_CLIFF: f32 = -0.8;
 const STABLE_DENDRITE_OHMS: f32 = 20.;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
+
+/// Maximum current the current source can provide
+const MAX_CURRENT_SOURCE_MA: f32 = 100.;
+/// Max allowed growth current
+const MAX_GROWTH_CURRENT_MA: f32 = MAX_CURRENT_SOURCE_MA * 0.7;
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
 const PLATEAU_CURRENT_GAP_MA: f32 = 18.0;
+
+/// If reported current is greater than requested current, we may have some concerns
+const PLATEAU_NEG_CURRENT_GAP_MA: f32 = -0.25;
 
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 10.; 
@@ -412,7 +420,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let mut end_drive_utc_dt = chrono::Utc::now();
     let mut end_drive_ms = end_drive_utc_dt.timestamp_millis();
     let mut drive_duration_ms = end_drive_ms - start_drive_ms;
-    if drive_duration_ms > (300 * PULSES_PER_MAINLOOP).into()  {
+    if drive_duration_ms > (325 * PULSES_PER_MAINLOOP).into()  {
         println!("drive_duration_ms: {} / {} = {} ms per pulse",drive_duration_ms, PULSES_PER_MAINLOOP, drive_duration_ms/(PULSES_PER_MAINLOOP as i64));
     }
 
@@ -490,25 +498,28 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Anchoring => { 
-            if reported_gap > PLATEAU_CURRENT_GAP_MA {
+            if reported_gap > PLATEAU_CURRENT_GAP_MA || (reported_gap < PLATEAU_NEG_CURRENT_GAP_MA ) {
                 // the actual current has diverged from desired current
                 state.drive_phase = DrivePhase::Growth;
                 state.phase_start_ms = end_drive_ms;
                 state.ohms_rate_ewma = 0.; //reset because it's scrambled by prior descent
-                state.max_ohms_ewma = state.ohms_ewma;
                 state.minr_update_ms = end_drive_ms;
-                println!("{} end Anchoring phase with max {:.3} Ohms, target {:.3} mA vs reported {:.3} mA ({} ms)", 
-                    end_drive_utc_dt.timestamp(), state.max_ohms_ewma, state.target_drive_ma, state.reported_drive_ma,
+                println!("{} end Anchoring phase with min {:.3} max {:.3} Ohms, target {:.3} mA vs reported {:.3} mA ({} ms)", 
+                    end_drive_utc_dt.timestamp(), state.min_ohms_ewma, state.max_ohms_ewma, state.target_drive_ma, state.reported_drive_ma,
                     phase_duration_ms
                 );
+                state.min_ohms_ewma = state.ohms_ewma;
+                state.max_ohms_ewma = state.ohms_ewma;
             }
-            else if reported_gap > 1.0 {
-                // slow down the rate of increasing current
-                new_drive_ma = state.target_drive_ma + MIN_DRIVE_CURRENT_INCR_MA;
-            }
-            else if reported_gap > 0. {
-                // increase the desired drive current until reported current diverges
-                new_drive_ma = state.target_drive_ma + 2.*MIN_DRIVE_CURRENT_INCR_MA;
+            else if reported_gap >= 0. {
+                if reported_gap > 1.0 {
+                    // slow down the rate of increasing current
+                    new_drive_ma = state.target_drive_ma + MIN_DRIVE_CURRENT_INCR_MA;
+                }
+                else {
+                    // increase the desired drive current until reported current diverges
+                    new_drive_ma = state.target_drive_ma + 5.*MIN_DRIVE_CURRENT_INCR_MA;
+                }
             }
         }
         DrivePhase::Growth => {  
@@ -655,8 +666,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Attempt to shut off all outputs before exiting
     ctx.disconnect().await?;
+    sleep(MODBUS_COMMANDS_TIMEOUT_SEC);
     println!("Reconnecting to: '{socket_addr:?}'");
-    let mut ctx: client::Context = tcp::connect(socket_addr).await?;
+    ctx = tcp::connect(socket_addr).await?;
     zero_control_outputs(&mut ctx).await?;
     ctx.disconnect().await?;
 
