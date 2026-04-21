@@ -19,10 +19,16 @@ use craven_control::*;
 
 
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
+
+
+const MODBUS_COMMANDS_TIMEOUT_SEC: Duration = Duration::from_secs(2);
+
 const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
 const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
-const CURRENT_PULSE_ON_TIME: Duration = CURRENT_SOURCE_STABILIZATION_TIME; 
-const CURRENT_PULSE_OFF_TIME: Duration = CURRENT_SOURCE_STABILIZATION_TIME;
+/// the guaranteed minimum "on" time for positive drive pulses
+const CURRENT_PULSE_ON_TIME: Duration = Duration::from_millis(50); 
+/// the guaranteed minimum "off" time between positive drive pulses
+const CURRENT_PULSE_OFF_TIME: Duration = Duration::from_millis(5);
 
 /// Average peak-to-peak interval for heating after warmup
 const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 260;
@@ -45,6 +51,9 @@ const PROBE_INSERTED_TEMP_C:f32 = 600.;
 const ELECTROLYTE_TARGET_TEMP_C:f32 = 775.;
 /// Above this temperature the furnace heat is out of control
 const EXCESSIVE_HEAT_TEMP_C:f32 = 800.;
+
+const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 15.;
+const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 7.5;
 
 
 /// If the electrodes were shorted together at room temperature, what resistance do we expect?
@@ -190,8 +199,6 @@ async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
 
 #[derive(Debug, Clone)]
 pub struct FurnaceState {
-    /// Prior maximum temperature
-    pub prior_max_temp_c: f32,
 
     /// Temperature set point
     pub setpoint_c: f32,
@@ -204,7 +211,6 @@ pub struct FurnaceState {
 }
 
 const INITIAL_FURNACE_STATE: FurnaceState = FurnaceState  { 
-        prior_max_temp_c: 0., 
         setpoint_c: PROBE_CHECK_TEMP_C, 
         measured_temp_c: 0., 
         heater_on: false 
@@ -225,7 +231,7 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
     let mut avg_core_tk_c: f32 = 
         if ch1_tk_opt.is_some() {
             if ch2_tk_opt.is_some() {  
-                if abs_diff_ne!(tk1_c, tk2_c, epsilon=15.) {
+                if abs_diff_ne!(tk1_c, tk2_c, epsilon=CUT_OUT_ABOVE_TARGET_TEMP_C) {
                     println!("TK1 {tk1_c:?}°C TK2 {tk2_c:?}°C ");
                 }
                 (tk1_c + tk2_c) / 2f32 
@@ -235,8 +241,6 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
         else if ch2_tk_opt.is_some() { tk2_c.into() }
         else { MAX_PROBE_TEMP_C as f32};
     
-
-
     state.measured_temp_c = avg_core_tk_c;
 
     // update the temperature setpoint based on which phase of electrolyte melting we're at
@@ -259,28 +263,25 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
         println!("setpoint old {:.3} new {:.3}", state.setpoint_c, new_temp_setpoint_c);
     }
 
-    // TODO proper bangbang controller?
+    // Dirt simple bangbang controller:
+    // - Cut out the heater when temperature exceeds a cut out point above the target temperature
+    // - Cut in the heater when temperature drops below a cut in point (above the target temperature)
     if state.heater_on {
-        if state.measured_temp_c > (new_temp_setpoint_c + 15.) {
-            println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, new_temp_setpoint_c);
+        if state.measured_temp_c > (new_temp_setpoint_c + CUT_OUT_ABOVE_TARGET_TEMP_C) {
+            //println!("set heater off at: {:.3} >= {:.3}", state.measured_temp_c, new_temp_setpoint_c);
             toggle_furnace(ctx, false).await?;
             state.heater_on = false;
         }
     }
-    else {
-        if state.measured_temp_c < (new_temp_setpoint_c  + 7.5) {
-            println!("set heater on at: {:.3} (target {:.3} )", state.measured_temp_c, new_temp_setpoint_c);
+    else { // !state.heater_on
+        if state.measured_temp_c < (new_temp_setpoint_c  + CUT_IN_ABOVE_TARGET_TEMP_C) {
+            //println!("set heater on at: {:.3} (target {:.3} )", state.measured_temp_c, new_temp_setpoint_c);
             toggle_furnace(ctx, true).await?;
             state.heater_on = true;
-            state.prior_max_temp_c = 0.; //reset
         }
     }
 
     state.setpoint_c = new_temp_setpoint_c;
-
-    if state.measured_temp_c > state.prior_max_temp_c {
-        state.prior_max_temp_c = state.measured_temp_c;
-    }
     
     Ok(())
 }
@@ -557,6 +558,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Connecting to: '{socket_addr:?}'");
     let mut ctx: client::Context = tcp::connect(socket_addr).await?;
+    
     enumerate_required_modules(&mut ctx).await?;
 
     zero_control_outputs(&mut ctx).await?;
@@ -599,13 +601,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let current_utc_dt = chrono::Utc::now();
         let next_run_instant = now_instant + INTER_LOOP_DELAY - Duration::from_millis(now_instant.elapsed().subsec_millis() as u64);
 
-        control_furnace(&mut ctx, &mut furnace_state).await?;
+        let furnace_res = tokio::time::timeout(MODBUS_COMMANDS_TIMEOUT_SEC,control_furnace(&mut ctx, &mut furnace_state)).await;
+        if !furnace_res.is_ok() { 
+            running.store(false, Ordering::SeqCst);
+            eprintln!("control_furnace timeout: {:?}",furnace_res);
+            continue;
+        }
 
         if (furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C && 
             furnace_state.measured_temp_c < EXCESSIVE_HEAT_TEMP_C) ||
             electrode_state.drive_phase == DrivePhase::Holding 
         {
-            control_electrodes(&mut ctx, &mut electrode_state).await?;
+            let elec_res = 
+                tokio::time::timeout(MODBUS_COMMANDS_TIMEOUT_SEC, control_electrodes(&mut ctx, &mut electrode_state)).await;
+            if !elec_res.is_ok() { 
+                running.store(false, Ordering::SeqCst);
+                eprintln!("control_electrodes timeout: {:?}",elec_res);
+                continue;
+            }
         }
         else {
             electrode_state = INITIAL_ELECTRODE_STATE;
@@ -623,7 +636,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
-        loop_count = (loop_count + 1) % 5;
+        loop_count = (loop_count + 1) % 4;
         if loop_count == 0 { csv_writer.flush(); }
 
         // Attempt to sync to about 1 Hz measurements
