@@ -203,11 +203,11 @@ pub async fn read_n4aia04_420_iv_adc(ctx: &mut tokio_modbus::client::Context)
 pub async fn read_wa8tai_one_channel(ctx: &mut tokio_modbus::client::Context, channel: u8)
 -> Result<f32, Box<dyn std::error::Error>> 
 {
-    let chan_offset = channel - 1; 
+    let chan_offset = (channel as u16) - 1; 
     ctx.set_slave(Slave(NODEID_WA8TAI_IV_ADC)); 
-    let resp: Vec<u16> = ctx.read_input_registers(0x0000, 8).await??; //read all 8 at once
+    let resp: Vec<u16> = ctx.read_input_registers(chan_offset, 1).await??; // read just one channel
     // println!("AIN resp: {resp:?}");
-    let val = resp[chan_offset as usize];
+    let val = resp[0];
     // println!("AIN ch {channel:?} val: {val:?}");
     //output range 4000~20000, unit uA;
     let converted_val = (val as f32) / 1E3; // either milliamps or volts
@@ -229,6 +229,8 @@ pub async fn read_wa8tai_volts_milliamps(ctx: &mut tokio_modbus::client::Context
 
     Ok((volts, milliamps))
 }
+
+
 
 /**
  * Set the pyro simulator current loop controller (4-20 mA source) current value

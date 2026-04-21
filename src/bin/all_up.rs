@@ -73,7 +73,7 @@ const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 const PLATEAU_CURRENT_GAP_MA: f32 = 16.0;
 
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
-const OPEN_CIRCUIT_VOLTS: f32 = 9.; 
+const OPEN_CIRCUIT_VOLTS: f32 = 10.; 
 
 /// Used when dendrite has formed
 const DENDRITE_CREEP_MA: f32 = 4.; 
@@ -117,6 +117,15 @@ async fn read_electrode_pair_iv_adc(ctx: &mut tokio_modbus::client::Context)
 -> Result<(f32, f32), Box<dyn std::error::Error>> 
 {
     read_wa8tai_volts_milliamps(ctx).await
+}
+
+///
+/// Read just the voltage across the electrodes using IV ADC
+/// 
+async fn read_electrode_pair_volts(ctx: &mut tokio_modbus::client::Context)
+-> Result<f32, Box<dyn std::error::Error>> 
+{
+    read_wa8tai_one_channel(ctx, 1).await
 }
 
  /// 
@@ -352,12 +361,10 @@ async fn drive_one_pulse(ctx: &mut tokio_modbus::client::Context,
 
     // Measure the resulting induced current and potential across the electrodes
     state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
-    let (measured_volts, elecm_ma) = read_electrode_pair_iv_adc(ctx).await?;
+    let measured_volts= read_electrode_pair_volts(ctx).await?;
     let measured_milliamps: f32 = 
-        if state.target_drive_ma > 0.  && measured_volts < OPEN_CIRCUIT_VOLTS {
-            if state.reported_drive_ma < MAX_AMMETER_VAL && elecm_ma > MIN_DRIVE_CURRENT_INCR_MA { elecm_ma }
-            else { state.reported_drive_ma }
-        }  else { 0. };
+        if state.target_drive_ma > 0.  && measured_volts < OPEN_CIRCUIT_VOLTS {  state.reported_drive_ma }  
+        else { 0. };
     let measured_ohms = 
         if measured_milliamps > 0. {
             // this also covers the case where volts = 0.0, i.e. zero resistance.
