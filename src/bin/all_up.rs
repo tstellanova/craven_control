@@ -102,7 +102,7 @@ const MAX_AMMETER_VAL: f32 = 20.0;
 const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
 
 /// Weighting alpha for calculating Exponential Weighted Moving Average of dR/dt
-const DRDT_EWMA_ALPHA: f32 = 0.1;
+const DRDT_EWMA_ALPHA: f32 = 0.2;
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -457,7 +457,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     
     // Check for significant drops in resistance
     if measured_ohms != INF_INTER_ELECTRODE_OHMS   {
-        let dr_dt = if state.measured_ohms != INF_INTER_ELECTRODE_OHMS {  (measured_ohms - state.measured_ohms) } else {2. * OHM_RATE_SETTLING_LIMIT };
+        let dr_dt = 
+            if state.measured_ohms != INF_INTER_ELECTRODE_OHMS { (measured_ohms - state.measured_ohms) } 
+            else {2. * OHM_RATE_SETTLING_LIMIT };
         update_ewma(&mut state.ohms_rate_ewma,dr_dt, DRDT_EWMA_ALPHA);
         update_ewma(&mut state.ohms_ewma, measured_ohms, RESISTANCE_EWMA_ALPHA);
 
