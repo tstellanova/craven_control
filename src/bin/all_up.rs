@@ -46,7 +46,7 @@ const PROBE_CHECK_TEMP_C:f32 = 550.;
 /// Temp we expect to see when probe is succesfully inserted into melt
 const PROBE_INSERTED_TEMP_C:f32 = 600.;
 /// The center temperature we are trying to achieve for the electrolyte melt
-const ELECTROLYTE_TARGET_TEMP_C:f32 = 772.;
+const ELECTROLYTE_TARGET_TEMP_C:f32 = 777.;
 /// Above this temperature the furnace heat is out of control
 const EXCESSIVE_HEAT_TEMP_C:f32 = 800.;
 
@@ -76,7 +76,7 @@ const MAX_GROWTH_CURRENT_MA: f32 = MAX_CURRENT_SOURCE_MA * 0.7;
 const PLATEAU_CURRENT_GAP_MA: f32 = 18.0;
 
 /// If reported current is greater than requested current, we may have some concerns
-const PLATEAU_NEG_CURRENT_GAP_MA: f32 = -0.25;
+const PLATEAU_NEG_CURRENT_GAP_MA: f32 = -0.7;
 
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 10.; 
@@ -87,7 +87,7 @@ const PROBE_CURRENT_MA: f32 = 1.;
 /// Used to gauge the initial (presumably zero-growth) inter-electrode resistance
 const GAUGE_CURRENT_MA: f32 = 5.;
 /// Used when bridge has formed across electrodes
-const BRIDGE_CREEP_MA: f32 = GAUGE_CURRENT_MA - 1.;
+const BRIDGE_CREEP_MA: f32 = GAUGE_CURRENT_MA ;
 /// Current to use to start anchoring phase
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 /// Used after we think we've achieved a solid carbon bridge 
@@ -577,7 +577,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 );
             }
             else if new_drive_ma > BRIDGE_CREEP_MA {
-                new_drive_ma -= 10.*MIN_DRIVE_CURRENT_INCR_MA;
+                new_drive_ma -= 5.*MIN_DRIVE_CURRENT_INCR_MA;
             }
         }
         DrivePhase::Holding => {
@@ -619,7 +619,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut csv_writer = BufWriter::new(logfile);
 
     const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,MinRew,dRdTew";
-    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.1},{:.2},{:.3},{:.1},{:.2},{:.1},{:.3}" } }
+    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.3}" } }
     
     println!("{}",CSV_HEADER);
     writeln!(csv_writer, "{}", CSV_HEADER)?;
