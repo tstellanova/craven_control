@@ -24,7 +24,10 @@ const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
 const MODBUS_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(3);
 
 const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
+/// minimum current stabilization time supported by the current source
 const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
+/// time we allow the current to settle before measuring
+const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(250);
 /// the guaranteed minimum "on" time for positive drive pulses
 const CURRENT_PULSE_ON_TIME: Duration = Duration::from_millis(50); 
 /// the guaranteed minimum "off" time between positive drive pulses
@@ -407,6 +410,38 @@ async fn drive_one_pulse(ctx: &mut tokio_modbus::client::Context,
 
 }
 
+
+/// 
+/// Set the electrode current and measure its response
+/// 
+async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
+    state: &mut ElectrodeState, settling_time: Duration
+)
+-> Result<(f32, f32, f32), Box<dyn std::error::Error>> 
+{
+    // Drive output current pulse based on prior settings, and measure result
+    set_electrode_current_drive(ctx, state.target_drive_ma).await?;
+    sleep(settling_time).await;
+
+    // Measure the resulting induced current and potential across the electrodes
+    state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
+    let measured_volts= read_electrode_pair_volts(ctx).await?;
+    let measured_milliamps: f32 = 
+        if state.target_drive_ma > 0.  && measured_volts < OPEN_CIRCUIT_VOLTS {  state.reported_drive_ma }  
+        else { 0. };
+    let measured_ohms = 
+        if measured_milliamps > 0. {
+            // this also covers the case where volts = 0.0, i.e. zero resistance.
+            (1000. * measured_volts) / measured_milliamps 
+        }
+        else {
+            INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
+        };
+
+    return Ok((measured_volts, measured_milliamps, measured_ohms))
+}
+
+
 /// 
 /// Adjust the electrode current based on melt condition and drive phase
 /// 
@@ -417,35 +452,14 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 {
     let mut start_drive_utc_dt = chrono::Utc::now();
     let mut start_drive_ms = start_drive_utc_dt.timestamp_millis();
-
-    let mut sum_volts = 0.;
-    let mut sum_milliamps = 0.;
-    let mut sum_ohms = 0.;
-    const PULSES_PER_MAINLOOP: i32 = 4;
-    const PULSES_AVG_FACTOR: f32 = (PULSES_PER_MAINLOOP as f32);
-    if state.target_drive_ma > 0. {
-        for _ in 0..PULSES_PER_MAINLOOP  {
-            // Drive output current pulse based on prior settings, and measure result
-            let (pulse_volts, pulse_milliamps, pulse_ohms) = 
-                drive_one_pulse(ctx, state, CURRENT_PULSE_ON_TIME, CURRENT_PULSE_OFF_TIME).await?;
-            sum_volts += pulse_volts;
-            sum_milliamps += pulse_milliamps;
-            sum_ohms += pulse_ohms;
-        }
-    } 
     
+    // Drive output current pulse based on prior settings, and measure result
+    let (measured_volts, measured_milliamps, measured_ohms) = 
+        drive_current_and_measure(ctx, state, CURRENT_SOURCE_WAIT_TIME).await?;
+
     let mut end_drive_utc_dt = chrono::Utc::now();
     let mut end_drive_ms = end_drive_utc_dt.timestamp_millis();
     let mut drive_duration_ms = end_drive_ms - start_drive_ms;
-    if drive_duration_ms > (325 * PULSES_PER_MAINLOOP).into()  {
-        println!("drive_duration_ms: {} / {} = {} ms per pulse",drive_duration_ms, PULSES_PER_MAINLOOP, drive_duration_ms/(PULSES_PER_MAINLOOP as i64));
-    }
-
-    // Average the pulse measurements
-    let measured_volts = sum_volts / PULSES_AVG_FACTOR;
-    let measured_milliamps = sum_milliamps / PULSES_AVG_FACTOR;
-    let measured_ohms = 
-        if measured_milliamps > 0. { sum_ohms / PULSES_AVG_FACTOR } else {INF_INTER_ELECTRODE_OHMS };
 
     let drive_duration_sec = (drive_duration_ms as f32)/1000.;
     let phase_duration_ms = 
