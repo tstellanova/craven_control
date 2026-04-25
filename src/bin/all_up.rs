@@ -536,6 +536,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 // reset min-max for next phase
                 state.min_ohms_ewma = INF_INTER_ELECTRODE_OHMS;
                 state.max_ohms_ewma = 5.;
+                state.minr_update_ms = end_drive_ms;
             }
         }
         DrivePhase::GaugeResistance => {
