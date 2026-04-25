@@ -28,7 +28,7 @@ const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
 /// minimum current stabilization time supported by the current source
 const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
 /// time we allow the current to settle before measuring
-const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(500);
+const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(750);
 /// the guaranteed minimum "on" time for positive drive pulses
 const CURRENT_PULSE_ON_TIME: Duration = Duration::from_millis(50); 
 /// the guaranteed minimum "off" time between positive drive pulses
@@ -62,7 +62,7 @@ const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 7.5;
 const MIN_INTER_ELECTRODE_OHMS: f32 = 9.;
 
 /// The limit of dR/dt magnitude indicating that we're reaching a transition
-const OHM_RATE_SETTLING_LIMIT: f32 = 10.0;
+const OHM_RATE_SETTLING_LIMIT: f32 = 5.0;
 
 /// The EWMA of dR/dt drops below this value when a bridge forms across electrodes
 const BRIDGE_OHM_RATE_CLIFF: f32 = -0.6;
@@ -97,11 +97,13 @@ const BRIDGE_CREEP_MA: f32 = GAUGE_CURRENT_MA ;
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 
 /// Growth phase variable current amplitude +/- added to mean value
-const GROWTH_PHASE_VARIABLE_AMPLITUDE_MA: f32 = 20.;
+const GROWTH_PHASE_VARIABLE_MA: f32 = 20.;
 /// Growth phase mean current value
-const GROWTH_PHASE_MEAN_AMPLITUDE_MA: f32 = 70.;
+const GROWTH_PHASE_MEAN_MA: f32 = 80.;
+
+const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 /// Growth phase sweep frequency
-const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./30.); // 0.033 Hz  -- 30 second cycle
+const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
 
 /// Used after we think we've achieved a solid carbon bridge 
 const HOLDING_PROBE_CURRENT_MA: f32 = 0.5;
@@ -487,20 +489,26 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     
     // Check for significant drops in resistance
     if state.measured_ma != 0. && measured_ohms != INF_INTER_ELECTRODE_OHMS   {
-        let dr_dt = 
-            if state.measured_ohms != INF_INTER_ELECTRODE_OHMS { (measured_ohms - state.measured_ohms) } 
-            else {2. * OHM_RATE_SETTLING_LIMIT };
-        update_ewma(&mut state.ohms_rate_ewma,dr_dt, DRDT_EWMA_ALPHA);
+        let prior_ohms_ewma = state.ohms_ewma;
         update_ewma(&mut state.ohms_ewma, measured_ohms, RESISTANCE_EWMA_ALPHA);
 
+        let dr_dt = 
+            if prior_ohms_ewma != INF_INTER_ELECTRODE_OHMS { state.ohms_ewma - prior_ohms_ewma }
+            else { 0. };
+        state.ohms_rate_ewma = dr_dt;
+        // TODO drop the EWMA for dr_dt
+        // update_ewma(&mut state.ohms_rate_ewma,dr_dt, DRDT_EWMA_ALPHA);
+
         // only evaluate minimum phase ohms when rate is not extreme 
-        if state.ohms_rate_ewma != 0. 
-            && state.ohms_rate_ewma.abs() < OHM_RATE_SETTLING_LIMIT  {
-            if state.ohms_ewma < state.min_ohms_ewma {
-                println!("{} minR {:.3} -> {:.3}", end_drive_utc_dt.timestamp(), state.min_ohms_ewma, state.ohms_ewma);
-                state.min_ohms_ewma = state.ohms_ewma;
-                state.minr_update_ms = end_drive_ms;
-            }
+        if phase_duration_ms > 30000 {
+            // if state.ohms_rate_ewma != 0. 
+            //     && state.ohms_rate_ewma.abs() < OHM_RATE_SETTLING_LIMIT  {
+                if state.ohms_ewma < state.min_ohms_ewma {
+                    println!("{} minR {:.3} -> {:.3}", end_drive_utc_dt.timestamp(), state.min_ohms_ewma, state.ohms_ewma);
+                    state.min_ohms_ewma = state.ohms_ewma;
+                    state.minr_update_ms = end_drive_ms;
+                }
+            // }
         }
     }
 
@@ -525,7 +533,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             // TODO TMP! -- skip to Growth phase directly
             if state.measured_ma > 0.7 {
                 state.drive_phase = DrivePhase::Growth;
-                new_drive_ma = GROWTH_PHASE_MEAN_AMPLITUDE_MA;
+                new_drive_ma = GROWTH_PHASE_MEAN_MA;
                 state.phase_start_ms = end_drive_ms;
                 state.phase_gauge_end_utc = end_drive_utc_dt.timestamp();
                 println!("{} end GaugeResistance phase: Ohms min {:.3} max {:.3} Ohms ({} ms) ",
@@ -642,7 +650,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 fn growth_current_at_time_ms(timestamp_ms: i64, zero_ms: i64) -> f32
 {
     let offset_time_sec: f32 = ((timestamp_ms  - zero_ms) as f32)/1000.;
-    let current = GROWTH_PHASE_MEAN_AMPLITUDE_MA + GROWTH_PHASE_VARIABLE_AMPLITUDE_MA * ((TAU * GROWTH_PHASE_SWEEP_FREQUENCY * offset_time_sec ).sin());
+    let current = GROWTH_PHASE_MEAN_MA + GROWTH_PHASE_VARIABLE_MA * ((TAU * GROWTH_PHASE_SWEEP_FREQUENCY * offset_time_sec ).sin());
     current
 }
 
