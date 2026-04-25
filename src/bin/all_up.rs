@@ -1,6 +1,7 @@
 #![allow(unused)]
 
 use std::f32::INFINITY;
+use std::f32::consts::{PI, TAU};
 use std::process::exit;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,7 +41,7 @@ const AVG_PKPK_HEAT_CYCLE_MS: u64 = AVG_HEAT_CYCLE_DURATION_SEC * 1000;
 /// Time limite for inter-electrode resistance gauging phase
 const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = AVG_PKPK_HEAT_CYCLE_MS;
 /// Time limit for minimum resistance to drop during Growth phase
-const GROWTH_PHASE_MINR_LIMIT_MS: u64 = (3*AVG_PKPK_HEAT_CYCLE_MS)/2;
+const GROWTH_PHASE_MINR_LIMIT_MS: u64 = 2*AVG_PKPK_HEAT_CYCLE_MS;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -96,6 +97,14 @@ const GAUGE_CURRENT_MA: f32 = 15. ; //5.;
 const BRIDGE_CREEP_MA: f32 = GAUGE_CURRENT_MA ;
 /// Current to use to start anchoring phase
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
+
+/// Growth phase variable current amplitude +/- added to mean value
+const GROWTH_PHASE_VARIABLE_AMPLITUDE_MA: f32 = 20.;
+/// Growth phase mean current value
+const GROWTH_PHASE_MEAN_AMPLITUDE_MA: f32 = 60.;
+/// Growth phase sweep frequency
+const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./40.); // 0.025 Hz  -- 40 second cycle
+
 /// Used after we think we've achieved a solid carbon bridge 
 const HOLDING_PROBE_CURRENT_MA: f32 = 0.5;
 /// The minimum increment for drive current, as specified in the current source docs
@@ -515,30 +524,19 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             new_drive_ma = GAUGE_CURRENT_MA;
             println!("gap: {:0.3}", current_gap);
 
-            // TODO tEMP! -- skip to Anchoring phase
+            // TODO TMP! -- skip to Growth phase directly
             if state.measured_ma > 0.7 {
-                state.drive_phase = DrivePhase::Anchoring;
-                new_drive_ma = INITIAL_ANCHORING_CURRENT_MA;
+                state.drive_phase = DrivePhase::Growth;
+                new_drive_ma = GROWTH_PHASE_MEAN_AMPLITUDE_MA;
                 state.phase_start_ms = end_drive_ms;
                 state.phase_gauge_end_utc = end_drive_utc_dt.timestamp();
                 println!("{} end GaugeResistance phase: Ohms min {:.3} max {:.3} Ohms ({} ms) ",
                     state.phase_gauge_end_utc, state.min_ohms_ewma, state.max_ohms_ewma, 
                     phase_duration_ms);
                 // reset min-max for next phase
-                state.min_ohms_ewma = state.ohms_ewma;
-                state.max_ohms_ewma = state.ohms_ewma;
+                state.min_ohms_ewma = INF_INTER_ELECTRODE_OHMS;
+                state.max_ohms_ewma = 5.;
             }
-
-            // // if current_gap < 0.7 {
-            //     // the measured current is about the same as probe current
-            //     new_drive_ma = GAUGE_CURRENT_MA ;
-            //     state.drive_phase = DrivePhase::GaugeResistance;
-            //     state.phase_start_ms = end_drive_ms;
-            //     state.phase_gauge_start_utc = end_drive_utc_dt.timestamp();
-            //     state.min_ohms_ewma = INF_INTER_ELECTRODE_OHMS; //reset due to prior phase corruption
-            //     state.ohms_ewma = INF_INTER_ELECTRODE_OHMS;
-            //     println!("{:?} start GaugeResistance phase ", state.phase_gauge_start_utc);
-            // // }
         }
         DrivePhase::GaugeResistance => {
             new_drive_ma = GAUGE_CURRENT_MA;
@@ -591,11 +589,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Growth => {  
             let minr_drop_delay = if end_drive_ms > state.minr_update_ms { end_drive_ms - state.minr_update_ms } else { 0};
             let growth_stalled = (minr_drop_delay > GROWTH_PHASE_MINR_LIMIT_MS as i64);
-            // TODO check for bridge formation
-            let bridge_formed =  false; // state.ohms_rate_ewma < BRIDGE_OHM_RATE_CLIFF ;
+            // TODO check for bridge formation, somehow
+            // let bridge_formed =   state.ohms_rate_ewma < BRIDGE_OHM_RATE_CLIFF ;
 
-            if bridge_formed || growth_stalled {
-                // switch to dendrite preservation
+            if growth_stalled {
+                // switch to bridge preservation
                 state.drive_phase = DrivePhase::Bridged;
                 state.phase_start_ms = end_drive_ms;
                 state.phase_growth_end_utc = end_drive_utc_dt.timestamp();
@@ -604,6 +602,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     state.ohms_ewma, state.ohms_rate_ewma,
                     phase_duration_ms
                 );
+            }
+            else {
+                new_drive_ma = growth_current_at_time_ms(end_drive_ms , state.phase_start_ms);
             }
         }
         DrivePhase::Bridged => {
@@ -637,7 +638,14 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     Ok(())
 }
 
-
+///
+/// Calculate the value of the desired growth current at a given time
+fn growth_current_at_time_ms(timestamp_ms: i64, zero_ms: i64) -> f32
+{
+    let offset_time_sec: f32 = ((timestamp_ms  - zero_ms) as f32)/1000.;
+    let current = GROWTH_PHASE_MEAN_AMPLITUDE_MA + GROWTH_PHASE_VARIABLE_AMPLITUDE_MA * ((TAU * GROWTH_PHASE_SWEEP_FREQUENCY * offset_time_sec ).sin());
+    current
+}
 
 /**
  * Entry point
