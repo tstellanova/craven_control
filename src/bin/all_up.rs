@@ -97,9 +97,9 @@ const BRIDGE_CREEP_MA: f32 = GAUGE_CURRENT_MA ;
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 
 /// Growth phase variable current amplitude +/- added to mean value
-const GROWTH_PHASE_VARIABLE_MA: f32 = 20.;
+const GROWTH_PHASE_VARIABLE_MA: f32 = 10.;
 /// Growth phase mean current value
-const GROWTH_PHASE_MEAN_MA: f32 = 80.;
+const GROWTH_PHASE_MEAN_MA: f32 = 90.;
 
 const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 /// Growth phase sweep frequency
