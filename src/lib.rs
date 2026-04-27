@@ -143,12 +143,32 @@ pub async fn set_ykpvccs0100_current_drive(ctx: &mut tokio_modbus::client::Conte
     Ok(())
 }    
 
+pub async fn set_ykpvccs1000_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_YKPVCCS010_CURR_SRC)); 
+
+    // precision is 1 mA, range is 0...1000
+    let out_ma_setting: u16 = ((milliamps).round()) as u16;
+    // println!("writing val of : {}", out_ma_setting);
+    ctx.write_single_register(REG_YKPVCCS_DRIVE_MILLIAMPS, out_ma_setting).await??;
+
+    Ok(())
+} 
+
 pub async fn read_ykpvccs0100_current_drive(ctx: &mut tokio_modbus::client::Context)
 -> Result<f32, Box<dyn std::error::Error>> 
-
 {
     let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_YKPVCCS_MONITOR_MILLIAMPS, 1).await??;
     let actual_ma = (read_rsp[0] as f32)/10.0;// precision is 0.1 mA
+    Ok(actual_ma)
+}
+
+pub async fn read_ykpvccs1000_current_drive(ctx: &mut tokio_modbus::client::Context)
+-> Result<f32, Box<dyn std::error::Error>> 
+{
+    let read_rsp: Vec<u16> = ctx.read_holding_registers(REG_YKPVCCS_MONITOR_MILLIAMPS, 1).await??;
+    let actual_ma = read_rsp[0] as f32;// precision is 1 mA
     Ok(actual_ma)
 }
 

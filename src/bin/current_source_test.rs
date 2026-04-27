@@ -12,6 +12,33 @@ use tokio_serial::SerialStream;
 use craven_control::*;
 
 
+/// Update the given Exponential Weighted Moving Average with a new value
+fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
+    *ewma = alpha * new_value + (1.0 - alpha) * *ewma;
+}
+
+
+async fn drive_current_and_measure_ccs1000(ctx: &mut tokio_modbus::client::Context,
+ requested_ma: f32, current_ewma: &mut f32, wait_time: Duration)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    set_ykpvccs1000_current_drive(ctx, requested_ma).await?;
+    sleep( wait_time).await;
+    let reported_ma =  read_ykpvccs1000_current_drive(ctx).await?;
+    update_ewma(current_ewma, reported_ma, 0.1);
+    Ok(())
+}
+
+async fn drive_current_and_measure_ccs0100(ctx: &mut tokio_modbus::client::Context,
+ requested_ma: f32, current_ewma: &mut f32, wait_time: Duration)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    set_ykpvccs0100_current_drive(ctx, requested_ma).await?;
+    sleep( wait_time).await;
+    let reported_ma =  read_ykpvccs0100_current_drive(ctx).await?;
+    update_ewma(current_ewma, reported_ma, 0.1);
+    Ok(())
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -35,11 +62,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         r.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
 
+    const MEASURE_CURRENT_WAIT_TIME: Duration = Duration::from_millis(500);
+    const REQUESTED_MA: f32 = 80.;
+    let mut current_ewma: f32 = REQUESTED_MA;
+
     while running.load(Ordering::SeqCst) { 
-        set_ykpvccs0100_current_drive(&mut ctx, 90.).await?;
-        sleep(Duration::from_millis(500)).await;
-        let reported_ma =  read_ykpvccs0100_current_drive(&mut ctx).await?;
-        println!("{}. {:.3} mA",chrono::Utc::now().timestamp_millis(), reported_ma);
+        tokio::time::timeout(Duration::from_secs(2), 
+        //drive_current_and_measure_ccs1000(&mut ctx, REQUESTED_MA, &mut current_ewma, MEASURE_CURRENT_WAIT_TIME)).await?;
+        drive_current_and_measure_ccs0100(&mut ctx, REQUESTED_MA, &mut current_ewma, MEASURE_CURRENT_WAIT_TIME)).await?;
+
+        println!("{} req {:.3} ewma {:.3} mA",chrono::Utc::now().timestamp_millis(), REQUESTED_MA, current_ewma);
     }
 
     println!("shutdown!");

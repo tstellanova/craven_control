@@ -107,10 +107,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let final_baud_rate = 115200;
 
     // Examples of changing the Modbus node baud rate for various devices 
-    set_one_modbus_node_baud(tty_path, NODEID_YKKTC1202_DUAL_TK, REG_YKKTC1202_BAUD, initial_baud_rate, final_baud_rate, 6).await?;
-    set_one_modbus_node_baud(tty_path, NODEID_WA8TAI_IV_ADC, REG_WA8TAI_BAUD, initial_baud_rate, final_baud_rate, 5).await?;
+    // set_one_modbus_node_baud(tty_path, NODEID_YKKTC1202_DUAL_TK, REG_YKKTC1202_BAUD, initial_baud_rate, final_baud_rate, 6).await?;
+    // set_one_modbus_node_baud(tty_path, NODEID_WA8TAI_IV_ADC, REG_WA8TAI_BAUD, initial_baud_rate, final_baud_rate, 5).await?;
     set_one_modbus_node_baud(tty_path, NODEID_YKPVCCS010_CURR_SRC, REG_YKPVCCS_BAUD, initial_baud_rate, final_baud_rate, 6).await?;
-    set_one_modbus_node_baud(tty_path, NODEID_R4DVI04_QRELAY_ADC, REG_R4DVI04_BAUD, initial_baud_rate, final_baud_rate, 7).await?;
+    // set_one_modbus_node_baud(tty_path, NODEID_R4DVI04_QRELAY_ADC, REG_R4DVI04_BAUD, initial_baud_rate, final_baud_rate, 7).await?;
 
     let builder = tokio_serial::new(tty_path, final_baud_rate);
     let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(254));

@@ -107,7 +107,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Examples of setting the Modbus node ID for various devices -- need only be done once
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_YKDAQ1402_IV_ADC, NODEID_DEFAULT, NODEID_YKDAQ1402_IV_ADC).await?;
-    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PREC_CURR, NODEID_DEFAULT, NODEID_PREC_CURR_SRC).await?;
+    
+    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_YKPVCCS010_CURR_SRC, NODEID_DEFAULT, NODEID_YKPVCCS010_CURR_SRC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_TK, NODEID_DEFAULT, NODEID_DUAL_TK).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PYRO_SIM, NODEID_DEFAULT, NODEID_PYRO_SIM).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4AIA04, 0x1E, NODEID_N4AIA04_IV_ADC).await?;
@@ -117,7 +118,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4IOA01, NODEID_DEFAULT, NODEID_N4IOA01_CURR_GEN).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA8TAI_IV_ADC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA26419_8CH_DAC).await?;
-    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_R4DVI04, NODEID_DEFAULT, NODEID_R4DVI04_QRELAY_ADC).await?;
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_R4DVI04, NODEID_DEFAULT, NODEID_R4DVI04_QRELAY_ADC).await?;
 
     //
 
