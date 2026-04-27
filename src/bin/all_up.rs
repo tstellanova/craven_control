@@ -110,6 +110,7 @@ const HOLDING_PROBE_CURRENT_MA: f32 = 1.0;
 /// The minimum increment for drive current, as specified in the current source docs
 const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
 
+const REPORTED_CURRENT_THRESHOLD_MA: f32 = 2.*MIN_DRIVE_CURRENT_INCR_MA;
 
 /// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
 const RESISTANCE_EWMA_ALPHA: f32 = 0.05;
@@ -436,7 +437,7 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
     state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
     let measured_volts= read_electrode_pair_volts(ctx).await?;
     let measured_milliamps: f32 = 
-        if state.target_drive_ma > 0.  && measured_volts < OPEN_CIRCUIT_VOLTS {  state.reported_drive_ma }  
+        if state.target_drive_ma > 0.  && state.reported_drive_ma > REPORTED_CURRENT_THRESHOLD_MA  {  state.reported_drive_ma }  
         else { 0. };
     let measured_ohms = 
         if measured_milliamps > 0. {
@@ -475,10 +476,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         if state.phase_start_ms <  end_drive_ms {  (end_drive_ms - state.phase_start_ms) as u64 } 
         else { 0 };
 
-    if  state.measured_ma== 0. {
-        println!("{} phase {} :  drive {:.3} mA  measured 0 mA", 
-        start_drive_utc_dt.timestamp(), state.drive_phase.clone() as u8, state.target_drive_ma);
-    }
+    // if  state.measured_ma== 0. {
+    //     println!("{} phase {} :  drive {:.3} mA  measured 0 mA", 
+    //     start_drive_utc_dt.timestamp(), state.drive_phase.clone() as u8, state.target_drive_ma);
+    // }
 
     // reuse old drive current until instructed otherwise
     let mut new_drive_ma: f32 = state.target_drive_ma;
@@ -522,10 +523,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     match state.drive_phase {
         DrivePhase::Warmup => {
             new_drive_ma = GAUGE_CURRENT_MA;
-            println!("gap: {:0.3}", current_gap);
+            // println!("gap: {:0.3}", current_gap);
 
             // TODO TMP! -- skip to Growth phase directly
-            if state.measured_ma > 0.7 {
+            if state.measured_ma > 0.7 && phase_duration_ms > 60000 {
                 state.drive_phase = DrivePhase::Growth;
                 new_drive_ma = GROWTH_PHASE_MEAN_MA;
                 state.phase_start_ms = end_drive_ms;
