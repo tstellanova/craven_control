@@ -28,7 +28,7 @@ const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
 /// minimum current stabilization time supported by the current source
 const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
 /// time we allow the current to settle before measuring
-const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(750);
+const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(250);
 /// the guaranteed minimum "on" time for positive drive pulses
 const CURRENT_PULSE_ON_TIME: Duration = Duration::from_millis(50); 
 /// the guaranteed minimum "off" time between positive drive pulses
@@ -397,9 +397,12 @@ async fn drive_one_pulse(ctx: &mut tokio_modbus::client::Context,
     set_electrode_current_drive(ctx, state.target_drive_ma).await?;
     sleep(high_time).await;
 
+    let mut total_volts = 0.;
     // Measure the resulting induced current and potential across the electrodes
     state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
-    let measured_volts= read_electrode_pair_volts(ctx).await?;
+
+    let measured_volts = read_electrode_pair_volts(ctx).await?;
+
     let measured_milliamps: f32 = 
         if state.target_drive_ma > 0.  && measured_volts < OPEN_CIRCUIT_VOLTS {  state.reported_drive_ma }  
         else { 0. };
@@ -435,7 +438,14 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
 
     // Measure the resulting induced current and potential across the electrodes
     state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
-    let measured_volts= read_electrode_pair_volts(ctx).await?;
+
+    let mut total_volts = 0.;
+    for i in 0..3 {
+        total_volts += read_electrode_pair_volts(ctx).await?;
+        sleep(Duration::from_millis(25));
+    }
+    let measured_volts = total_volts / 3.;
+
     let measured_milliamps: f32 = 
         if state.target_drive_ma > 0.  && state.reported_drive_ma > REPORTED_CURRENT_THRESHOLD_MA  {  state.reported_drive_ma }  
         else { 0. };
