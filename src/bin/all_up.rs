@@ -22,7 +22,7 @@ use craven_control::*;
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
 
 /// How long to wait for series of modbus transactions to complete
-const MODBUS_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(3);
+const MODBUS_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(4);
 
 const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
 /// minimum current stabilization time supported by the current source
@@ -97,27 +97,23 @@ const BRIDGE_CREEP_MA: f32 = GAUGE_CURRENT_MA ;
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 
 /// Growth phase variable current amplitude +/- added to mean value
-const GROWTH_PHASE_VARIABLE_MA: f32 = 10.;
+const GROWTH_PHASE_VARIABLE_MA: f32 = MAX_CURRENT_SOURCE_MA / 5.;
 /// Growth phase mean current value
-const GROWTH_PHASE_MEAN_MA: f32 = 90.;
+const GROWTH_PHASE_MEAN_MA: f32 = MAX_CURRENT_SOURCE_MA * 0.8;
 
 const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 /// Growth phase sweep frequency
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
 
 /// Used after we think we've achieved a solid carbon bridge 
-const HOLDING_PROBE_CURRENT_MA: f32 = 0.5;
+const HOLDING_PROBE_CURRENT_MA: f32 = 1.0;
 /// The minimum increment for drive current, as specified in the current source docs
 const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
-/// The range of the ammeter
-const MAX_AMMETER_VAL: f32 = 20.0;
 
 
 /// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
-const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
+const RESISTANCE_EWMA_ALPHA: f32 = 0.05;
 
-/// Weighting alpha for calculating Exponential Weighted Moving Average of dR/dt
-const DRDT_EWMA_ALPHA: f32 = 0.2;
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -336,8 +332,8 @@ pub struct ElectrodeState {
     minr_update_ms: i64,
     /// Maximum value of inter-electrode resistance at start of growth phase
     max_ohms_ewma: f32,
-    /// Exponential moving average of the rate of change (dR/dt) of inter-electrode resistance
-    ohms_rate_ewma: f32,
+    /// Finite difference of prior ohms_ewma and new
+    ohms_rate: f32,
     /// The drive current to send to the electrodes
     target_drive_ma: f32,
     /// The actual drive current reported by the current source
@@ -370,7 +366,7 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             min_ohms_ewma: INF_INTER_ELECTRODE_OHMS,
             minr_update_ms:0,
             max_ohms_ewma: 0.,
-            ohms_rate_ewma:0.,
+            ohms_rate:0.,
             target_drive_ma: MIN_DRIVE_CURRENT_INCR_MA,
             reported_drive_ma:0.,
             measured_ma:0.,
@@ -495,10 +491,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         let dr_dt = 
             if prior_ohms_ewma != INF_INTER_ELECTRODE_OHMS { state.ohms_ewma - prior_ohms_ewma }
             else { 0. };
-        state.ohms_rate_ewma = dr_dt;
-        // TODO drop the EWMA for dr_dt
-        // update_ewma(&mut state.ohms_rate_ewma,dr_dt, DRDT_EWMA_ALPHA);
-
+        state.ohms_rate = dr_dt;
+ 
         // only evaluate minimum phase ohms when rate is not extreme 
         if phase_duration_ms > 30000 {
             // if state.ohms_rate_ewma != 0. 
@@ -571,7 +565,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 // the actual current has diverged from desired current
                 state.drive_phase = DrivePhase::Growth;
                 state.phase_start_ms = end_drive_ms;
-                state.ohms_rate_ewma = 0.; //reset because it's scrambled by prior descent
+                state.ohms_rate = 0.; //reset because it's scrambled by prior descent
                 state.phase_anchoring_end_utc = end_drive_utc_dt.timestamp();
                 println!("{} end Anchoring phase with min {:.3} max {:.3} Ohms, gap {:.3} mA ({} ms)", 
                     state.phase_anchoring_end_utc, 
@@ -606,7 +600,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.phase_growth_end_utc = end_drive_utc_dt.timestamp();
                 println!("{:?} end Growth phase with V {:.2} Rew {:.2} dR/dt {:.3} ({} ms)", 
                     state.phase_growth_end_utc, state.measured_volts, 
-                    state.ohms_ewma, state.ohms_rate_ewma,
+                    state.ohms_ewma, state.ohms_rate,
                     phase_duration_ms
                 );
             }
@@ -622,7 +616,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.phase_bridged_end_utc = end_drive_utc_dt.timestamp();
                 new_drive_ma = HOLDING_PROBE_CURRENT_MA;
                 println!("{} end Bridge phase with V {:.2} R {:.2} dR/dt {:.3} ({} ms)", 
-                    state.phase_bridged_end_utc, state.measured_volts, state.measured_ohms, state.ohms_rate_ewma,
+                    state.phase_bridged_end_utc, state.measured_volts, state.measured_ohms, state.ohms_rate,
                     phase_duration_ms
                 );
             }
@@ -739,7 +733,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             electrode_state.target_drive_ma, electrode_state.measured_ma,
             electrode_state.measured_volts, 
             electrode_state.measured_ohms, electrode_state.ohms_ewma, electrode_state.min_ohms_ewma,
-            electrode_state.ohms_rate_ewma
+            electrode_state.ohms_rate
         );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
