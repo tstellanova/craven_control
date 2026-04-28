@@ -99,13 +99,13 @@ const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 /// Growth phase variable current amplitude +/- added to mean value
 const GROWTH_PHASE_VARIABLE_MA: f32 = 10.;
 /// Growth phase mean current value
-const GROWTH_PHASE_MEAN_MA: f32 = 40.;
+const GROWTH_PHASE_MEAN_MA: f32 = 100.;
 
 const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 /// Growth phase sweep frequency
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
 
-const ENABLE_GROWTH_SWEEP: bool = true;
+const ENABLE_GROWTH_SWEEP: bool = false;
 
 /// Used after we think we've achieved a solid carbon bridge 
 const HOLDING_PROBE_CURRENT_MA: f32 = 1.0;
@@ -429,12 +429,14 @@ async fn drive_one_pulse(ctx: &mut tokio_modbus::client::Context,
 /// 
 async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
     state: &mut ElectrodeState, settling_time: Duration
-)
+) 
 -> Result<(f32, f32, f32), Box<dyn std::error::Error>> 
 {
     // Drive output current pulse based on prior settings, and measure result
     set_electrode_current_drive(ctx, state.target_drive_ma).await?;
     sleep(settling_time).await;
+    state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
+    // println!("drive_phase: {:?} r_ma: {:.3}", state.drive_phase, state.reported_drive_ma);
 
     // Measure the resulting induced current and potential across the electrodes
     let mut total_volts = 0.;
@@ -443,7 +445,7 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
         sleep(CURRENT_SOURCE_STABILIZATION_TIME);
     }
     let measured_volts = total_volts / 3.;
-    state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
+    // println!("drive_phase: {:?} volts: {:.3}", state.drive_phase, measured_volts);
 
     let measured_milliamps: f32 = 
         if state.target_drive_ma > 0.  && state.reported_drive_ma > REPORTED_CURRENT_THRESHOLD_MA  {  state.reported_drive_ma }  
@@ -472,9 +474,12 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let mut start_drive_utc_dt = chrono::Utc::now();
     let mut start_drive_ms = start_drive_utc_dt.timestamp_millis();
     
+
     // Drive output current pulse based on prior settings, and measure result
     let (measured_volts, measured_milliamps, measured_ohms) = 
         drive_current_and_measure(ctx, state, CURRENT_SOURCE_WAIT_TIME).await?;
+
+    // println!("drive_phase: {:?} volts: {:.23}", state.drive_phase, measured_volts);
 
     let mut end_drive_utc_dt = chrono::Utc::now();
     let mut end_drive_ms = end_drive_utc_dt.timestamp_millis();
@@ -523,6 +528,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
         else { 100. }; // outrageously large current gap
 
+    // println!("phase {:?} duration: {}", state.drive_phase, phase_duration_ms/1000);
+
     // Then calculate any drive phase transitions
     match state.drive_phase {
         DrivePhase::Warmup => {
@@ -542,6 +549,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.min_ohms_ewma = INF_INTER_ELECTRODE_OHMS;
                 state.max_ohms_ewma = 5.;
                 state.minr_update_ms = end_drive_ms;
+            }
+            else {
+                println!("DrivePhase::Warmup duration: {}", phase_duration_ms/1000);
             }
         }
         DrivePhase::GaugeResistance => {
@@ -711,6 +721,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let current_utc_dt = chrono::Utc::now();
         let next_run_instant = now_instant + INTER_LOOP_DELAY - Duration::from_millis(now_instant.elapsed().subsec_millis() as u64);
 
+        
         let furnace_res = 
             tokio::time::timeout(MODBUS_TRANSACTION_TIMEOUT,control_furnace(&mut ctx, &mut furnace_state)).await;
         if !furnace_res.is_ok() { 
@@ -718,6 +729,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("control_furnace timeout: {:?}",furnace_res);
             continue;
         }
+
 
         if (furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C && 
             furnace_state.measured_temp_c < EXCESSIVE_HEAT_TEMP_C) ||
@@ -732,6 +744,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         else {
+            println!("drive_phase: {:?} temp: {:.2}", electrode_state.drive_phase, furnace_state.measured_temp_c);
             electrode_state = INITIAL_ELECTRODE_STATE;
             electrode_state.phase_start_ms = current_utc_dt.timestamp_millis();
         }
