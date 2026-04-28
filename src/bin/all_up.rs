@@ -28,7 +28,7 @@ const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
 /// minimum current stabilization time supported by the current source
 const CURRENT_SOURCE_STABILIZATION_TIME: Duration = Duration::from_millis(25);
 /// time we allow the current to settle before measuring
-const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(250);
+const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(125);
 /// the guaranteed minimum "on" time for positive drive pulses
 const CURRENT_PULSE_ON_TIME: Duration = Duration::from_millis(50); 
 /// the guaranteed minimum "off" time between positive drive pulses
@@ -41,7 +41,7 @@ const AVG_PKPK_HEAT_CYCLE_MS: u64 = AVG_HEAT_CYCLE_DURATION_SEC * 1000;
 /// Time limite for inter-electrode resistance gauging phase
 const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = AVG_PKPK_HEAT_CYCLE_MS;
 /// Time limit for minimum resistance to drop during Growth phase
-const GROWTH_PHASE_MINR_LIMIT_MS: u64 = (3*AVG_PKPK_HEAT_CYCLE_MS)/2;
+const GROWTH_PHASE_MINR_LIMIT_MS: u64 = 2*AVG_PKPK_HEAT_CYCLE_MS;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -97,13 +97,15 @@ const BRIDGE_CREEP_MA: f32 = GAUGE_CURRENT_MA ;
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 
 /// Growth phase variable current amplitude +/- added to mean value
-const GROWTH_PHASE_VARIABLE_MA: f32 = MAX_CURRENT_SOURCE_MA / 5.;
+const GROWTH_PHASE_VARIABLE_MA: f32 = 10.;
 /// Growth phase mean current value
-const GROWTH_PHASE_MEAN_MA: f32 = MAX_CURRENT_SOURCE_MA * 0.8;
+const GROWTH_PHASE_MEAN_MA: f32 = 40.;
 
 const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 /// Growth phase sweep frequency
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
+
+const ENABLE_GROWTH_SWEEP: bool = true;
 
 /// Used after we think we've achieved a solid carbon bridge 
 const HOLDING_PROBE_CURRENT_MA: f32 = 1.0;
@@ -397,10 +399,8 @@ async fn drive_one_pulse(ctx: &mut tokio_modbus::client::Context,
     set_electrode_current_drive(ctx, state.target_drive_ma).await?;
     sleep(high_time).await;
 
-    let mut total_volts = 0.;
     // Measure the resulting induced current and potential across the electrodes
     state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
-
     let measured_volts = read_electrode_pair_volts(ctx).await?;
 
     let measured_milliamps: f32 = 
@@ -437,14 +437,13 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
     sleep(settling_time).await;
 
     // Measure the resulting induced current and potential across the electrodes
-    state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
-
     let mut total_volts = 0.;
     for i in 0..3 {
         total_volts += read_electrode_pair_volts(ctx).await?;
-        sleep(Duration::from_millis(25));
+        sleep(CURRENT_SOURCE_STABILIZATION_TIME);
     }
     let measured_volts = total_volts / 3.;
+    state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
 
     let measured_milliamps: f32 = 
         if state.target_drive_ma > 0.  && state.reported_drive_ma > REPORTED_CURRENT_THRESHOLD_MA  {  state.reported_drive_ma }  
@@ -485,11 +484,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let phase_duration_ms = 
         if state.phase_start_ms <  end_drive_ms {  (end_drive_ms - state.phase_start_ms) as u64 } 
         else { 0 };
-
-    // if  state.measured_ma== 0. {
-    //     println!("{} phase {} :  drive {:.3} mA  measured 0 mA", 
-    //     start_drive_utc_dt.timestamp(), state.drive_phase.clone() as u8, state.target_drive_ma);
-    // }
 
     // reuse old drive current until instructed otherwise
     let mut new_drive_ma: f32 = state.target_drive_ma;
@@ -616,7 +610,12 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 );
             }
             else {
-                new_drive_ma = growth_current_at_time_ms(end_drive_ms , state.phase_start_ms);
+                if ENABLE_GROWTH_SWEEP {
+                    new_drive_ma = growth_current_at_time_ms(end_drive_ms , state.phase_start_ms);
+                }
+                else {
+                    new_drive_ma = GROWTH_PHASE_MEAN_MA;
+                }
             }
         }
         DrivePhase::Bridged => {
