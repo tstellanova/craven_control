@@ -58,8 +58,8 @@ const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 12.5;
 const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 7.5;
 
 
-/// If the electrodes were shorted together at room temperature, what resistance do we expect?
-const MIN_INTER_ELECTRODE_OHMS: f32 = 9.;
+/// If the electrodes were shorted together at melt temperature, what resistance do we expect?
+const MIN_INTER_ELECTRODE_OHMS: f32 = 10.;
 
 /// The limit of dR/dt magnitude indicating that we're reaching a transition
 const OHM_RATE_SETTLING_LIMIT: f32 = 5.0;
@@ -90,14 +90,14 @@ const OPEN_CIRCUIT_VOLTS: f32 = 10.;
 /// Used to probe for electrolyte or carbon bridge conductivity
 const PROBE_CURRENT_MA: f32 = 1.;
 /// Used to gauge the initial (presumably zero-growth) inter-electrode resistance
-const GAUGE_CURRENT_MA: f32 = 15. ; //5.;
+const GAUGE_CURRENT_MA: f32 = 15. ; 
 /// Used when bridge has formed across electrodes
-const BRIDGE_CREEP_MA: f32 = GAUGE_CURRENT_MA ;
+const BRIDGE_CREEP_MA: f32 = 5. ;
 /// Current to use to start anchoring phase
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 
 /// Growth phase variable current amplitude +/- added to mean value
-const GROWTH_PHASE_VARIABLE_MA: f32 = 10.;
+const GROWTH_PHASE_VARIABLE_MA: f32 = 50. * MIN_DRIVE_CURRENT_INCR_MA;
 /// Growth phase mean current value
 const GROWTH_PHASE_MEAN_MA: f32 = 100.;
 
@@ -106,6 +106,7 @@ const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
 
 const ENABLE_GROWTH_SWEEP: bool = false;
+const ENABLE_GROWTH_EXT_TRIGGER: bool = false;
 
 /// Used after we think we've achieved a solid carbon bridge 
 const HOLDING_PROBE_CURRENT_MA: f32 = 1.0;
@@ -115,7 +116,7 @@ const MIN_DRIVE_CURRENT_INCR_MA: f32 = 0.1;
 const REPORTED_CURRENT_THRESHOLD_MA: f32 = 2.*MIN_DRIVE_CURRENT_INCR_MA;
 
 /// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
-const RESISTANCE_EWMA_ALPHA: f32 = 0.05;
+const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
 
 
 /// Update the given Exponential Weighted Moving Average with a new value
@@ -156,7 +157,8 @@ async fn read_electrode_pair_volts(ctx: &mut tokio_modbus::client::Context)
  /// 
 async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<(), Box<dyn std::error::Error>> 
 {
-    set_ykpvccs0100_current_drive(ctx, milliamps).await
+    // set_ykpvccs0100_current_drive(ctx, milliamps).await
+    set_ykpvccs1000_current_drive(ctx, milliamps).await
 }
 
 /// 
@@ -169,7 +171,8 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     ping_one_modbus_node_id(ctx, NODEID_YKKTC1202_DUAL_TK, REG_NODEID_YKKTC1202_DUAL_TK).await?;
 
     // measures voltage and current across the electrodes
-    ping_one_modbus_node_id(ctx,NODEID_WA8TAI_IV_ADC, REG_NODEID_WAVESHARE_V2).await?;
+    // ping_one_modbus_node_id(ctx,NODEID_WA8TAI_IV_ADC, REG_NODEID_WAVESHARE_V2).await?;
+    // TODO  we can't ping WDCU3003 because it doesn't expose node ID??
 
     // supplies current to the electrode probe
     ping_one_modbus_node_id(ctx,NODEID_YKPVCCS010_CURR_SRC, REG_NODEID_YKPVCCS010_CURR_SRC).await?;
@@ -218,12 +221,25 @@ async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
     Ok(())
 }
 
+ /// 
+ /// Toggle the external current trigger circuit on and off
+ /// 
+async fn toggle_ext_current_trigger(ctx: &mut tokio_modbus::client::Context, active:bool)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    println!("toggle_ext_current_trigger: {:?}",active);
+    sleep(MODBUS_RW_DELAY).await;
+    toggle_r4dvi04_relay(ctx,1, active).await?;
+    Ok(())
+}
+
 /// Shut off the furnace heater, shut off any current drive.
 async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
 -> Result<(), Box<dyn std::error::Error>> 
 {
     println!("Shutting down outputs...");
     toggle_furnace(ctx, false).await?;
+    toggle_ext_current_trigger(ctx, false).await?;
     set_electrode_current_drive(ctx,0.).await?;
     println!("Outputs disabled.");
     Ok(())
@@ -234,10 +250,9 @@ pub struct FurnaceState {
 
     /// Temperature set point
     pub setpoint_c: f32,
-
     /// Most recently measured temperature
     pub measured_temp_c: f32,
-
+    /// Whether the furnace heater is turned on
     pub heater_on: bool,
 
 }
@@ -345,7 +360,8 @@ pub struct ElectrodeState {
     measured_ma: f32,
     /// The actual measured potential across the electrodes 
     measured_volts: f32,
-    
+    /// Whether the external trigger circuit, controlling current source, is powered
+    ext_trigger_powered: bool,
     /// Timestamp when GaugeResistance phase started 
     phase_gauge_start_utc: i64,
     /// Timestamp when GaugeResistance ended
@@ -374,6 +390,7 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             reported_drive_ma:0.,
             measured_ma:0.,
             measured_volts:0., 
+            ext_trigger_powered: false,
             phase_gauge_start_utc: 0,
             phase_gauge_end_utc: 0,
             phase_anchoring_end_utc: 0,
@@ -435,21 +452,32 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
     // Drive output current pulse based on prior settings, and measure result
     set_electrode_current_drive(ctx, state.target_drive_ma).await?;
     sleep(settling_time).await;
-    state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
+
+    // state.reported_drive_ma = read_ykpvccs0100_current_drive(ctx).await?;
+    state.reported_drive_ma = read_ykpvccs1000_current_drive(ctx).await?;
+
     // println!("drive_phase: {:?} r_ma: {:.3}", state.drive_phase, state.reported_drive_ma);
+
+    // let (measured_volts, measured_milliamps) =
+    //     read_wdcu3003_iv_adc(ctx).await?;
 
     // Measure the resulting induced current and potential across the electrodes
     let mut total_volts = 0.;
+    let mut total_milliamps = 0.;
     for i in 0..3 {
-        total_volts += read_electrode_pair_volts(ctx).await?;
+        let (step_volts, step_milliamps) = read_wdcu3003_iv_adc(ctx).await?;
+        // total_volts += read_electrode_pair_volts(ctx).await?;
+        total_volts += step_volts;
+        total_milliamps += step_milliamps;
         sleep(CURRENT_SOURCE_STABILIZATION_TIME);
     }
     let measured_volts = total_volts / 3.;
-    // println!("drive_phase: {:?} volts: {:.3}", state.drive_phase, measured_volts);
 
     let measured_milliamps: f32 = 
-        if state.target_drive_ma > 0.  && state.reported_drive_ma > REPORTED_CURRENT_THRESHOLD_MA  {  state.reported_drive_ma }  
+        if state.target_drive_ma > 0.  && state.reported_drive_ma > REPORTED_CURRENT_THRESHOLD_MA  
+        {  total_milliamps / 3. }  
         else { 0. };
+
     let measured_ohms = 
         if measured_milliamps > 0. {
             // this also covers the case where volts = 0.0, i.e. zero resistance.
@@ -493,27 +521,27 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     // reuse old drive current until instructed otherwise
     let mut new_drive_ma: f32 = state.target_drive_ma;
     
+    state.ohms_rate = 0.;
+
     // Check for significant drops in resistance
     if state.measured_ma != 0. && measured_ohms != INF_INTER_ELECTRODE_OHMS   {
-        let prior_ohms_ewma = state.ohms_ewma;
         update_ewma(&mut state.ohms_ewma, measured_ohms, RESISTANCE_EWMA_ALPHA);
-
-        let dr_dt = 
-            if prior_ohms_ewma != INF_INTER_ELECTRODE_OHMS { state.ohms_ewma - prior_ohms_ewma }
-            else { 0. };
-        state.ohms_rate = dr_dt;
  
         // only evaluate minimum phase ohms when rate is not extreme 
         if phase_duration_ms > 30000 {
-            // if state.ohms_rate_ewma != 0. 
-            //     && state.ohms_rate_ewma.abs() < OHM_RATE_SETTLING_LIMIT  {
-                if state.ohms_ewma < state.min_ohms_ewma {
-                    println!("{} minR {:.3} -> {:.3}", end_drive_utc_dt.timestamp(), state.min_ohms_ewma, state.ohms_ewma);
-                    state.min_ohms_ewma = state.ohms_ewma;
-                    state.minr_update_ms = end_drive_ms;
-                }
-            // }
+            if state.ohms_ewma < state.min_ohms_ewma {
+                // normalize the rate as a percentage
+                state.ohms_rate = 
+                    if state.min_ohms_ewma != INF_INTER_ELECTRODE_OHMS { 
+                        (state.ohms_ewma - state.min_ohms_ewma)/state.min_ohms_ewma }
+                    else { 1. }; // max rate of change
+                println!("{} minR {:.3} -> {:.3} ({:.3})", 
+                    end_drive_utc_dt.timestamp(), state.min_ohms_ewma, state.ohms_ewma, state.ohms_rate);
+                state.min_ohms_ewma = state.ohms_ewma;
+                state.minr_update_ms = end_drive_ms;
+            }
         }
+
     }
 
     state.measured_ohms = measured_ohms;
@@ -537,7 +565,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             // println!("gap: {:0.3}", current_gap);
 
             // TODO TMP! -- skip to Growth phase directly
-            if state.measured_ma > 0.7 && phase_duration_ms > 60000 {
+            if state.measured_ma > 0.7 && phase_duration_ms > 30000 {
                 state.drive_phase = DrivePhase::Growth;
                 new_drive_ma = GROWTH_PHASE_MEAN_MA;
                 state.phase_start_ms = end_drive_ms;
@@ -626,9 +654,23 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 else {
                     new_drive_ma = GROWTH_PHASE_MEAN_MA;
                 }
+
+                if ENABLE_GROWTH_EXT_TRIGGER  {
+                    if !state.ext_trigger_powered {
+                        toggle_ext_current_trigger(ctx, true).await?;
+                        state.ext_trigger_powered = true;
+                    }
+                    else {
+                        println!("reported mA: {:.2}",state.reported_drive_ma);
+                    }
+                }
             }
         }
         DrivePhase::Bridged => {
+            if state.ext_trigger_powered {
+                toggle_ext_current_trigger(ctx, false).await?;
+                state.ext_trigger_powered = false;
+            }
             if state.measured_ohms < MIN_INTER_ELECTRODE_OHMS  {
                 // inter-electrode resistance is close to zero, indicating that the electrode-electrode gap has been bridged
                 state.drive_phase = DrivePhase::Holding;
@@ -641,7 +683,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 );
             }
             else if new_drive_ma > BRIDGE_CREEP_MA {
-                new_drive_ma -= 5.*MIN_DRIVE_CURRENT_INCR_MA;
+                new_drive_ma -= 2.*MIN_DRIVE_CURRENT_INCR_MA;
             }
         }
         DrivePhase::Holding => {
@@ -689,7 +731,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,MinRew,dRdTew";
+    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,MinRew,dRdT";
     macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.3}" } }
     
     println!("{}",CSV_HEADER);
@@ -729,7 +771,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             eprintln!("control_furnace timeout: {:?}",furnace_res);
             continue;
         }
-
 
         if (furnace_state.measured_temp_c > PROBE_INSERTED_TEMP_C && 
             furnace_state.measured_temp_c < EXCESSIVE_HEAT_TEMP_C) ||

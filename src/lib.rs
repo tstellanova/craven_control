@@ -2,7 +2,7 @@
 
 use tokio_modbus::prelude::*;
 use tokio::time::sleep;
-use std::time::Duration;
+use std::{time::Duration};
 
 /// # Modbus node address assignments
 ///
@@ -136,15 +136,18 @@ pub async fn read_wdcu3003_iv_adc(ctx: &mut tokio_modbus::client::Context)
 {
     ctx.set_slave(Slave(NODEID_WDCU3003_IV_ADC));
     let iv_adc_vals: Vec<u16> = ctx.read_holding_registers(0, 4).await??;
+    // println!("WDCU3003 vals: {:?}",iv_adc_vals);
+    let raw_potential_val = iv_adc_vals[0] as f32;
+    let high_range = iv_adc_vals[1] != 0;
+    let raw_current_val: f32 = iv_adc_vals[2] as f32;
+    let milliwatts_val = iv_adc_vals[3] as f32;
 
-    let millivolt_value = iv_adc_vals[0] as f32;
-    let volt_val = millivolt_value / 1000.;
-    let microamp_value = iv_adc_vals[2] as f32;
-    let milliamp_value = microamp_value / 1000.; 
+    let volt_val = raw_potential_val / 1000.;
+    let milliamps_val = 
+        if high_range { milliwatts_val / volt_val }
+        else {raw_current_val / 1000. };
 
-    // println!(" wdcu3003 volt_val:  {volt_val:?} V");
-    // println!(" wdcu3003 milliamp_value: {milliamp_value:?} mA");
-    Ok((volt_val, milliamp_value))
+    Ok((volt_val, milliamps_val))
 }
 
 /**
