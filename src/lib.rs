@@ -24,6 +24,7 @@ pub const NODEID_BROADCAST_0: u8 = 0x00;
 pub const NODEID_DEFAULT: u8 = 0x01; // The Modbus node ID that most devices default to
 pub const NODEID_N4VIA02_IV_ADC: u8 = 0x1A; 
 pub const NODEID_WA8TAI_IV_ADC: u8 = 0x1B; // Waveshare WA8TAI 8CH IV ADC
+pub const NODEID_WDCU3003_IV_ADC: u8 = 0x13; // Set via the front panel, to decimal 19 == 0x13
 pub const NODEID_N4AIA04_IV_ADC: u8 = 0x1E;
 pub const NODEID_YKDAQ1402_IV_ADC: u8 = 0x1F;
 pub const NODEID_YKPVCCS010_CURR_SRC: u8 = 0x2F;
@@ -104,10 +105,10 @@ pub async fn ping_one_modbus_node_id(ctx: &mut tokio_modbus::client::Context, no
     Ok(())
 }
 
-/**
- * Read the voltage and current at active electrode pair.
- * 
- */
+
+///
+/// Read the voltage and current at active electrode pair.
+///
 pub async fn read_ykdaq1402_iv_adc(ctx: &mut tokio_modbus::client::Context)
 -> Result<(f32, f32), Box<dyn std::error::Error>> 
 {
@@ -124,6 +125,26 @@ pub async fn read_ykdaq1402_iv_adc(ctx: &mut tokio_modbus::client::Context)
     println!(" YKDAQ1402 ch1_value: {ch1_value:?} = {verified_volts:?} V");
     println!(" YKDAQ1402 ch2_value: {ch2_value:?} = {verified_milliamps:?} mA");
     Ok((verified_volts, verified_milliamps))
+}
+
+
+///
+/// Read the voltage and current at active electrode pair.
+///
+pub async fn read_wdcu3003_iv_adc(ctx: &mut tokio_modbus::client::Context)
+-> Result<(f32, f32), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_WDCU3003_IV_ADC));
+    let iv_adc_vals: Vec<u16> = ctx.read_holding_registers(0, 4).await??;
+
+    let millivolt_value = iv_adc_vals[0] as f32;
+    let volt_val = millivolt_value / 1000.;
+    let microamp_value = iv_adc_vals[2] as f32;
+    let milliamp_value = microamp_value / 1000.; 
+
+    // println!(" wdcu3003 volt_val:  {volt_val:?} V");
+    // println!(" wdcu3003 milliamp_value: {milliamp_value:?} mA");
+    Ok((volt_val, milliamp_value))
 }
 
 /**
