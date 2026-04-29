@@ -48,11 +48,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ctx.set_slave(Slave(NODEID_WDCU3003_IV_ADC));
 
     while running.load(Ordering::SeqCst) { 
-        println!("read ...");
         let (volts, milliamps) =  tokio::time::timeout(Duration::from_secs(5),
         read_wdcu3003_iv_adc(&mut ctx)).await??;
-        println!("{} volts {:.3} mA {:.3} mA",chrono::Utc::now().timestamp_millis(), volts, milliamps);
-        //ctx.set_slave(Slave(NODEID_DEFAULT));
+        println!("{}  {:.3} V , {:.3} mA",chrono::Utc::now().timestamp_millis(), volts, milliamps);
         sleep(MEASURE_WAIT_TIME).await;
     }
 
