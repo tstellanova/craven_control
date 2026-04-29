@@ -99,13 +99,13 @@ const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 /// Growth phase variable current amplitude +/- added to mean value
 const GROWTH_PHASE_VARIABLE_MA: f32 = 50. * MIN_DRIVE_CURRENT_INCR_MA;
 /// Growth phase mean current value
-const GROWTH_PHASE_MEAN_MA: f32 = 100.;
+const GROWTH_PHASE_MEAN_MA: f32 = 50.;
 
 const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 /// Growth phase sweep frequency
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
 
-const ENABLE_GROWTH_SWEEP: bool = false;
+const ENABLE_GROWTH_SWEEP: bool = true;
 const ENABLE_GROWTH_EXT_TRIGGER: bool = false;
 
 /// Used after we think we've achieved a solid carbon bridge 
