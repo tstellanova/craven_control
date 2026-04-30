@@ -99,10 +99,14 @@ const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 /// Growth phase variable current amplitude +/- added to mean value
 const GROWTH_PHASE_VARIABLE_MA: f32 = 10.;
 /// Growth phase mean current value
-const GROWTH_PHASE_MEAN_MA: f32 = 55.;
+const GROWTH_PHASE_MEAN_MA: f32 = 120.;
 
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
-const GROWTH_PHASE_PERIOD_SEC: f32 = 12.; // 0.083 Hz  -- 12 second cycle
+// const GROWTH_PHASE_PERIOD_SEC: f32 = 16.; // 0.062 Hz  -- 16 second cycle
+// const GROWTH_PHASE_PERIOD_SEC: f32 = 15.; // 0.067 Hz  -- 15 second cycle
+// const GROWTH_PHASE_PERIOD_SEC: f32 = 12.; // 0.083 Hz  -- 12 second cycle
+const GROWTH_PHASE_PERIOD_SEC: f32 = 10.; // 0.1 Hz  -- 10 second cycle
+
 /// Growth phase sweep frequency
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
 
