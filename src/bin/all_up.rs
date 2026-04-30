@@ -536,7 +536,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     if state.min_ohms_ewma != INF_INTER_ELECTRODE_OHMS { 
                         (state.ohms_ewma - state.min_ohms_ewma)/state.min_ohms_ewma }
                     else { 1. }; // max rate of change
-                println!("{} minR {:.3} -> {:.3} ({:.3})", 
+                println!("{} minR {:.3} -> {:.3} ({:.5})", 
                     end_drive_utc_dt.timestamp(), state.min_ohms_ewma, state.ohms_ewma, state.ohms_rate);
                 state.min_ohms_ewma = state.ohms_ewma;
                 state.minr_update_ms = end_drive_ms;
@@ -733,7 +733,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut csv_writer = BufWriter::new(logfile);
 
     const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,MinRew,dRdT";
-    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.3}" } }
+    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.5}" } }
     
     println!("{}",CSV_HEADER);
     writeln!(csv_writer, "{}", CSV_HEADER)?;
