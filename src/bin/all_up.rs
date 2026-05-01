@@ -89,15 +89,15 @@ const BRIDGE_CREEP_MA: f32 = 5. ;
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 
 /// Growth phase variable current amplitude +/- added to mean value
-const GROWTH_PHASE_VARIABLE_MA: f32 = 20.;
+const GROWTH_PHASE_VARIABLE_MA: f32 = 15.;
 /// Growth phase mean current value
-const GROWTH_PHASE_MEAN_MA: f32 = 200.;
+const GROWTH_PHASE_MEAN_MA: f32 = 175.;
 
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 16.; // 0.062 Hz  -- 16 second cycle
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 15.; // 0.067 Hz  -- 15 second cycle
-// const GROWTH_PHASE_PERIOD_SEC: f32 = 12.; // 0.083 Hz  -- 12 second cycle
-const GROWTH_PHASE_PERIOD_SEC: f32 = 10.; // 0.1 Hz  -- 10 second cycle
+const GROWTH_PHASE_PERIOD_SEC: f32 = 12.; // 0.083 Hz  -- 12 second cycle
+// const GROWTH_PHASE_PERIOD_SEC: f32 = 10.; // 0.1 Hz  -- 10 second cycle
 
 /// Growth phase sweep frequency
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
@@ -706,6 +706,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_time = chrono::Utc::now().timestamp();
     let log_out_filename = format!("{}_recorder.csv",start_time);
     println!("Recording data to {log_out_filename:?} ...");
+    println!("Mean {:.2} mA, Variable {:.2} mA, sweep {:?}, period {}, ext_trig {:?}",
+        GROWTH_PHASE_MEAN_MA, GROWTH_PHASE_VARIABLE_MA, ENABLE_GROWTH_SWEEP, GROWTH_PHASE_PERIOD_SEC, ENABLE_GROWTH_EXT_TRIGGER);
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
