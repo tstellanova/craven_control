@@ -80,9 +80,9 @@ const PLATEAU_NEG_CURRENT_GAP_MA: f32 = -0.7;
 /// Used to probe for electrolyte or carbon bridge conductivity
 const PROBE_CURRENT_MA: f32 = 1.;
 /// Fixed Warmup phase current
-const WARMUP_CURRENT_MA: f32 = 12.5;
+const WARMUP_CURRENT_MA: f32 = 10.;
 /// Used to gauge the initial (presumably zero-growth) inter-electrode resistance
-const GAUGE_CURRENT_MA: f32 = 15. ; 
+const GAUGE_CURRENT_MA: f32 = 12.5 ; 
 /// Used when bridge has formed across electrodes
 const BRIDGE_CREEP_MA: f32 = 5. ;
 /// Current to use to start anchoring phase
@@ -523,16 +523,15 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     // Then calculate any drive phase transitions
     match state.drive_phase {
         DrivePhase::Warmup => {
+            // while the melt is warming up, monitor the current throughput 
             new_drive_ma = WARMUP_CURRENT_MA;
-
-            // TODO TMP! -- skip to Growth phase directly
-            if phase_duration_ms > 60000 && state.measured_ma > (new_drive_ma / 2.)  {
-                state.drive_phase = DrivePhase::Growth;
-                new_drive_ma = (WARMUP_CURRENT_MA + GROWTH_PHASE_MEAN_MA)/2.;
+            if phase_duration_ms > 30000 && state.measured_ma > (new_drive_ma / 2.)  {
+                state.drive_phase = DrivePhase::GaugeResistance;
+                new_drive_ma = (WARMUP_CURRENT_MA + GAUGE_CURRENT_MA)/2.;
                 state.phase_start_ms = end_drive_ms;
-                state.phase_gauge_end_utc = end_drive_utc_dt.timestamp();
+                state.phase_gauge_start_utc = end_drive_utc_dt.timestamp();
                 println!("{} end Warmup ({} ms) ",
-                    state.phase_gauge_end_utc,  
+                    end_drive_ms,  
                     phase_duration_ms);
                 // reset min-max for next phase
                 state.min_ohms_ewma = INF_INTER_ELECTRODE_OHMS;
@@ -550,17 +549,17 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
             // continue probing over multiple heat/cool cycles to characterize resistance
             if phase_duration_ms > GAUGE_RESISTANCE_PHASE_DUR_MS {
-                state.drive_phase = DrivePhase::Anchoring;
-                new_drive_ma = INITIAL_ANCHORING_CURRENT_MA;
+                state.drive_phase = DrivePhase::Growth;
                 state.phase_start_ms = end_drive_ms;
                 state.phase_gauge_end_utc = end_drive_utc_dt.timestamp();
                 println!("{} end GaugeResistance phase: Ohms min {:.3} max {:.3} Ohms ({} ms) ",
                     state.phase_gauge_end_utc, 
                     state.min_ohms_ewma, state.max_ohms_ewma, 
                     phase_duration_ms);
-                // reset min-max for next phase
-                state.min_ohms_ewma = state.ohms_ewma;
-                state.max_ohms_ewma = state.ohms_ewma;
+                 // reset min-max for next phase
+                state.min_ohms_ewma = INF_INTER_ELECTRODE_OHMS;
+                state.max_ohms_ewma = 5.;
+                state.minr_update_ms = end_drive_ms;
             }
         }
         DrivePhase::Anchoring => { 
