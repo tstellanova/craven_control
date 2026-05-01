@@ -41,7 +41,7 @@ const AVG_PKPK_HEAT_CYCLE_MS: u64 = AVG_HEAT_CYCLE_DURATION_SEC * 1000;
 /// Time limite for inter-electrode resistance gauging phase
 const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = AVG_PKPK_HEAT_CYCLE_MS;
 /// Time limit for minimum resistance to drop during Growth phase
-const GROWTH_PHASE_MINR_LIMIT_MS: u64 = 2*AVG_PKPK_HEAT_CYCLE_MS;
+const GROWTH_PHASE_MINR_LIMIT_MS: u64 = (3*AVG_PKPK_HEAT_CYCLE_MS/2);
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -97,9 +97,9 @@ const BRIDGE_CREEP_MA: f32 = 5. ;
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 
 /// Growth phase variable current amplitude +/- added to mean value
-const GROWTH_PHASE_VARIABLE_MA: f32 = 10.;
+const GROWTH_PHASE_VARIABLE_MA: f32 = 20.;
 /// Growth phase mean current value
-const GROWTH_PHASE_MEAN_MA: f32 = 120.;
+const GROWTH_PHASE_MEAN_MA: f32 = 200.;
 
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 16.; // 0.062 Hz  -- 16 second cycle
@@ -111,7 +111,7 @@ const GROWTH_PHASE_PERIOD_SEC: f32 = 10.; // 0.1 Hz  -- 10 second cycle
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
 
 const ENABLE_GROWTH_SWEEP: bool = true;
-const ENABLE_GROWTH_EXT_TRIGGER: bool = false;
+const ENABLE_GROWTH_EXT_TRIGGER: bool = true;
 
 /// Used after we think we've achieved a solid carbon bridge 
 const HOLDING_PROBE_CURRENT_MA: f32 = 1.0;
