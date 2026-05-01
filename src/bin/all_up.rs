@@ -89,9 +89,9 @@ const BRIDGE_CREEP_MA: f32 = 5. ;
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 
 /// Growth phase variable current amplitude +/- added to mean value
-const GROWTH_PHASE_VARIABLE_MA: f32 = 15.;
+const GROWTH_PHASE_VARIABLE_MA: f32 = 20.;
 /// Growth phase mean current value
-const GROWTH_PHASE_MEAN_MA: f32 = 175.;
+const GROWTH_PHASE_MEAN_MA: f32 = 80.;
 
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 16.; // 0.062 Hz  -- 16 second cycle
@@ -103,7 +103,7 @@ const GROWTH_PHASE_PERIOD_SEC: f32 = 12.; // 0.083 Hz  -- 12 second cycle
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
 
 const ENABLE_GROWTH_SWEEP: bool = true;
-const ENABLE_GROWTH_EXT_TRIGGER: bool = true;
+const ENABLE_GROWTH_EXT_TRIGGER: bool = false;
 
 /// Used after we think we've achieved a solid carbon bridge 
 const HOLDING_PROBE_CURRENT_MA: f32 = 2.0;
@@ -115,7 +115,7 @@ const REPORTED_CURRENT_THRESHOLD_MA: f32 = 2.*MIN_DRIVE_CURRENT_INCR_MA;
 /// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
 const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
 /// Weighting alpha for calculating Exponential Weighted Moving Average of MinR rate of change
-const MINR_RATE_EWMA_ALPHA: f32 = 0.2;
+const MINR_RATE_EWMA_ALPHA: f32 = 0.1;
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -495,7 +495,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     if state.min_ohms_ewma != INF_INTER_ELECTRODE_OHMS { 
                         (state.ohms_ewma - state.min_ohms_ewma)/state.min_ohms_ewma }
                     else { 1. }; // max rate of change
-                update_ewma(&mut state.ohms_rate_ewma, state.ohms_rate, MINR_RATE_EWMA_ALPHA);
 
                 println!("{} minR -> {:.3} ({:.5} ... {:.5})", 
                     end_drive_utc_dt.timestamp(), state.ohms_ewma, state.ohms_rate, state.ohms_rate_ewma);
@@ -505,6 +504,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
 
     }
+    update_ewma(&mut state.ohms_rate_ewma, state.ohms_rate, MINR_RATE_EWMA_ALPHA);
 
     state.measured_ohms = measured_ohms;
     state.measured_volts = measured_volts;
