@@ -711,8 +711,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,MinRew,dRdT";
-    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.5}" } }
+    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,MinRew,RR,RRew";
+    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.5},{:.5}" } }
     
     println!("{}",CSV_HEADER);
     writeln!(csv_writer, "{}", CSV_HEADER)?;
@@ -777,7 +777,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             electrode_state.target_drive_ma, electrode_state.measured_ma,
             electrode_state.measured_volts, 
             electrode_state.measured_ohms, electrode_state.ohms_ewma, electrode_state.min_ohms_ewma,
-            electrode_state.ohms_rate
+            electrode_state.ohms_rate, electrode_state.ohms_rate_ewma
         );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
