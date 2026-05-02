@@ -534,9 +534,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 println!("{} end Warmup ({} ms) ",
                     end_drive_ms,  
                     phase_duration_ms);
-                // reset min-max for next phase
-                state.min_ohms_ewma = INF_INTER_ELECTRODE_OHMS;
-                state.max_ohms_ewma = 5.;
+                // provide a reference point for min-max for next phase
+                state.min_ohms_ewma = state.ohms_ewma;
+                state.max_ohms_ewma = state.ohms_ewma;
                 state.minr_update_ms = end_drive_ms;
             }
             else {
