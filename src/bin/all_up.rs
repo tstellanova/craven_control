@@ -90,7 +90,7 @@ const BRIDGE_CREEP_MA: f32 = 5. ;
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 
 /// Mean voltage to strive for, with constant voltage mode in Gauge phase
-const MEAN_CV_GAUGE_MV: f32 = 1.0 * 1000.;
+const MEAN_CV_GAUGE_MV: f32 = 1.2 * 1000.;
 /// Mean voltage to strive for, with constant voltage mode in Growth phase
 const MEAN_CV_GROWTH_MV: f32 = 2.0 * 1000.;
 
@@ -494,16 +494,23 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     if state.measured_ma != 0. && measured_ohms != INF_INTER_ELECTRODE_OHMS   {
         update_ewma(&mut state.ohms_ewma, measured_ohms, RESISTANCE_EWMA_ALPHA);
         // we only update ohms_rate if minR drops
-        if state.ohms_ewma < state.min_ohms_ewma {
-            // normalize the rate as a percentage
-            state.ohms_rate = 
-                if state.min_ohms_ewma != INF_INTER_ELECTRODE_OHMS { 
-                    (state.ohms_ewma - state.min_ohms_ewma)/state.min_ohms_ewma }
-                else { 0. }; // max rate of change of declining minR
+        match state.drive_phase {
+            DrivePhase::Warmup => {
+                // 
+            }
+            _ => {
+                if state.ohms_ewma < state.min_ohms_ewma {
+                    // normalize the rate as a percentage
+                    state.ohms_rate = 
+                        if state.min_ohms_ewma != INF_INTER_ELECTRODE_OHMS { 
+                            (state.ohms_ewma - state.min_ohms_ewma)/state.min_ohms_ewma }
+                        else { 0. }; // max rate of change of declining minR
 
-            println!("{} minR -> {:.3} ({:.5})", end_drive_utc_dt.timestamp(), state.ohms_ewma, state.ohms_rate);
-            state.min_ohms_ewma = state.ohms_ewma;
-            state.minr_update_ms = end_drive_ms;
+                    println!("{} minR -> {:.3} ({:.5})", end_drive_utc_dt.timestamp(), state.ohms_ewma, state.ohms_rate);
+                    state.min_ohms_ewma = state.ohms_ewma;
+                    state.minr_update_ms = end_drive_ms;
+                }
+            }
         }
     }
     update_ewma(&mut state.ohms_rate_ewma, state.ohms_rate, MINR_RATE_EWMA_ALPHA);
@@ -627,7 +634,16 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             else {
                 if ENABLE_CONSTANT_VOLT_GROWTH {
                     // calculate current value for (nearly) constant voltage
-                    if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
+                    if ENABLE_GROWTH_EXT_TRIGGER {
+                        let measured_mv = state.measured_volts * 1000.;
+                        if measured_mv > MEAN_CV_GROWTH_MV {
+                            new_drive_ma -= 2.;
+                        }
+                        else if measured_mv < MEAN_CV_GROWTH_MV {
+                            new_drive_ma += 5.;
+                        }
+                    }
+                    else if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
                         new_drive_ma = MEAN_CV_GROWTH_MV / state.ohms_ewma;
                     }
                 }
@@ -649,7 +665,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Bridged => {
            if new_drive_ma > BRIDGE_CREEP_MA {
                 // slowly reduce the current 
-                new_drive_ma -= 2.*MIN_DRIVE_CURRENT_INCR_MA;
+                new_drive_ma -= 10.;
             }
             else {
                 // drive current is about BRIDGE_CREEP_MA -- turn off ext_trigger if it was powered
