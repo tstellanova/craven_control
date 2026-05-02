@@ -90,9 +90,9 @@ const BRIDGE_CREEP_MA: f32 = 5. ;
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 
 /// Mean voltage to strive for, with constant voltage mode in Gauge phase
-const MEAN_CV_GAUGE_MV: f32 = 1.2 * 1000.;
+const MEAN_CV_GAUGE_MV: f32 = 1.0 * 1000.;
 /// Mean voltage to strive for, with constant voltage mode in Growth phase
-const MEAN_CV_GROWTH_MV: f32 = 2.4 * 1000.;
+const MEAN_CV_GROWTH_MV: f32 = 2.0 * 1000.;
 
 /// Growth phase variable current amplitude +/- added to mean value
 const GROWTH_PHASE_VARIABLE_MA: f32 = 20.;
@@ -109,7 +109,7 @@ const GROWTH_PHASE_PERIOD_SEC: f32 = 12.; // 0.083 Hz  -- 12 second cycle
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
 
 const ENABLE_GROWTH_SWEEP: bool = false;
-const ENABLE_GROWTH_EXT_TRIGGER: bool = false;
+const ENABLE_GROWTH_EXT_TRIGGER: bool = true;
 const ENABLE_CONSTANT_VOLT_GROWTH: bool = true;
 
 /// Used after we think we've achieved a solid carbon bridge 
@@ -607,7 +607,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.drive_phase = DrivePhase::Bridged;
                 state.phase_start_ms = end_drive_ms;
                 state.phase_growth_end_utc = end_drive_utc_dt.timestamp();
-                println!("{:?} end bridged Growth phase w/ minR {:.2} minRewma {:.5} ({} ms)", 
+                println!("{:?} end bridged Growth phase w/ Rewma {:.2} RRewma {:.5} ({} ms)", 
                     state.phase_growth_end_utc, 
                     state.ohms_ewma, state.ohms_rate_ewma,
                     phase_duration_ms
@@ -647,19 +647,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Bridged => {
-            if state.measured_ohms < MIN_INTER_ELECTRODE_OHMS  {
-                // inter-electrode resistance is close to zero
-                state.drive_phase = DrivePhase::Holding;
-                state.phase_start_ms = end_drive_ms;
-                state.phase_bridged_end_utc = end_drive_utc_dt.timestamp();
-                new_drive_ma = HOLDING_PROBE_CURRENT_MA;
-                println!("{} end Bridge phase with  R {:.2} ({} ms)", 
-                    state.phase_bridged_end_utc, 
-                    state.measured_ohms, 
-                    phase_duration_ms
-                );
-            }
-            else if new_drive_ma > BRIDGE_CREEP_MA {
+           if new_drive_ma > BRIDGE_CREEP_MA {
                 // slowly reduce the current 
                 new_drive_ma -= 2.*MIN_DRIVE_CURRENT_INCR_MA;
             }
@@ -669,6 +657,15 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     toggle_ext_current_trigger(ctx, false).await?;
                     state.ext_trigger_powered = false;
                 }
+                state.drive_phase = DrivePhase::Holding;
+                state.phase_start_ms = end_drive_ms;
+                state.phase_bridged_end_utc = end_drive_utc_dt.timestamp();
+                new_drive_ma = HOLDING_PROBE_CURRENT_MA;
+                println!("{} end Bridge phase with  R {:.2} ({} ms)", 
+                    state.phase_bridged_end_utc, 
+                    state.measured_ohms, 
+                    phase_duration_ms
+                );
             }
         }
         DrivePhase::Holding => {
