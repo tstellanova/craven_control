@@ -62,7 +62,8 @@ const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 7.5;
 const MIN_INTER_ELECTRODE_OHMS: f32 = 7.;
 
 /// The EWMA of the minR change rate drops below this value when a bridge forms across electrodes
-const BRIDGE_OHM_RATE_CLIFF: f32 = -0.03;
+// const BRIDGE_OHM_RATE_CLIFF: f32 = -0.03;
+const BRIDGE_OHM_RATE_CLIFF: f32 = -0.05;
 
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
@@ -535,7 +536,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     end_drive_ms,  
                     phase_duration_ms);
                 // provide a reference point for min-max for next phase
-                state.min_ohms_ewma = state.ohms_ewma;
+                state.min_ohms_ewma = 100.;
                 state.max_ohms_ewma = state.ohms_ewma;
                 state.minr_update_ms = end_drive_ms;
             }
