@@ -88,6 +88,11 @@ const BRIDGE_CREEP_MA: f32 = 5. ;
 /// Current to use to start anchoring phase
 const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 
+/// Mean voltage to strive for, with constant voltage mode in Gauge phase
+const MEAN_CV_GAUGE_MV: f32 = 1.2 * 1000.;
+/// Mean voltage to strive for, with constant voltage mode in Growth phase
+const MEAN_CV_GROWTH_MV: f32 = 2.4 * 1000.;
+
 /// Growth phase variable current amplitude +/- added to mean value
 const GROWTH_PHASE_VARIABLE_MA: f32 = 20.;
 /// Growth phase mean current value
@@ -102,8 +107,9 @@ const GROWTH_PHASE_PERIOD_SEC: f32 = 12.; // 0.083 Hz  -- 12 second cycle
 /// Growth phase sweep frequency
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
 
-const ENABLE_GROWTH_SWEEP: bool = true;
+const ENABLE_GROWTH_SWEEP: bool = false;
 const ENABLE_GROWTH_EXT_TRIGGER: bool = false;
+const ENABLE_CONSTANT_VOLT_GROWTH: bool = true;
 
 /// Used after we think we've achieved a solid carbon bridge 
 const HOLDING_PROBE_CURRENT_MA: f32 = 2.0;
@@ -547,6 +553,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             if state.max_ohms_ewma < state.ohms_ewma {
                 state.max_ohms_ewma = state.ohms_ewma;
             }
+            // calculate current value for (nearly) constant voltage
+            if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
+                new_drive_ma = MEAN_CV_GAUGE_MV / state.ohms_ewma;
+            }
             // continue probing over multiple heat/cool cycles to characterize resistance
             if phase_duration_ms > GAUGE_RESISTANCE_PHASE_DUR_MS {
                 state.drive_phase = DrivePhase::Growth;
@@ -594,7 +604,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Growth => {  
             let minr_drop_delay = if end_drive_ms > state.minr_update_ms { end_drive_ms - state.minr_update_ms } else { 0};
             let growth_stalled = (minr_drop_delay > GROWTH_PHASE_MINR_LIMIT_MS as i64);
-            let bridge_formed =   state.ohms_rate_ewma < BRIDGE_OHM_RATE_CLIFF ;
+            let bridge_formed =   state.ohms_rate_ewma < BRIDGE_OHM_RATE_CLIFF  || state.ohms_ewma < MIN_INTER_ELECTRODE_OHMS;
 
             if bridge_formed {
                 // switch to bridge preservation
@@ -619,7 +629,13 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 );
             }
             else {
-                if ENABLE_GROWTH_SWEEP {
+                if ENABLE_CONSTANT_VOLT_GROWTH {
+                    // calculate current value for (nearly) constant voltage
+                    if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
+                        new_drive_ma = MEAN_CV_GROWTH_MV / state.ohms_ewma;
+                    }
+                }
+                else if ENABLE_GROWTH_SWEEP {
                     new_drive_ma = growth_current_at_time_ms(end_drive_ms , state.phase_start_ms);
                 }
                 else {
@@ -705,8 +721,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_time = chrono::Utc::now().timestamp();
     let log_out_filename = format!("{}_recorder.csv",start_time);
     println!("Recording data to {log_out_filename:?} ...");
-    println!("Mean {:.2} mA, Variable {:.2} mA, sweep {:?}, period {}, ext_trig {:?}",
-        GROWTH_PHASE_MEAN_MA, GROWTH_PHASE_VARIABLE_MA, ENABLE_GROWTH_SWEEP, GROWTH_PHASE_PERIOD_SEC, ENABLE_GROWTH_EXT_TRIGGER);
+    if ENABLE_GROWTH_SWEEP {
+        println!("Mean {:.2} mA, Variable {:.2} mA, sweep {:?}, period {}, ext_trig {:?}",
+            GROWTH_PHASE_MEAN_MA, GROWTH_PHASE_VARIABLE_MA, ENABLE_GROWTH_SWEEP, GROWTH_PHASE_PERIOD_SEC, ENABLE_GROWTH_EXT_TRIGGER);
+    }
+    if ENABLE_CONSTANT_VOLT_GROWTH {
+       println!("Constant Voltage mode. Gauge {:.2} mV, Growth {:.2} mV,  ext_trig {:?}",
+            MEAN_CV_GAUGE_MV, MEAN_CV_GROWTH_MV , ENABLE_GROWTH_EXT_TRIGGER);
+    }
+    else {
+        println!("Current mode. Mean {:.2} mA, Variable {:.2} mA, sweep {:?}, period {}, ext_trig {:?}",
+            GROWTH_PHASE_MEAN_MA, GROWTH_PHASE_VARIABLE_MA, ENABLE_GROWTH_SWEEP, GROWTH_PHASE_PERIOD_SEC, ENABLE_GROWTH_EXT_TRIGGER);
+    }
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
