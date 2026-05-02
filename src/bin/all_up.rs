@@ -682,7 +682,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 new_drive_ma = HOLDING_PROBE_CURRENT_MA;
                 println!("{} end Bridge phase with  R {:.2} ({} ms)", 
                     state.phase_bridged_end_utc, 
-                    state.measured_ohms, 
+                    state.ohms_ewma, 
                     phase_duration_ms
                 );
             }
