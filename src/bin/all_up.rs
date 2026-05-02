@@ -489,26 +489,21 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     // until we measure otherwise, assume the minR change for this iteration is zero
     state.ohms_rate = 0.;
 
-    // Check for significant drops in resistance
+    // Update ohms_ewma, ohms_rate, Check for significant drops in resistance, and update ohms_rate
     if state.measured_ma != 0. && measured_ohms != INF_INTER_ELECTRODE_OHMS   {
         update_ewma(&mut state.ohms_ewma, measured_ohms, RESISTANCE_EWMA_ALPHA);
- 
-        // only evaluate minimum phase ohms when rate is not extreme 
-        if phase_duration_ms > 15000 {
-            if state.ohms_ewma < state.min_ohms_ewma {
-                // normalize the rate as a percentage
-                state.ohms_rate = 
-                    if state.min_ohms_ewma != INF_INTER_ELECTRODE_OHMS { 
-                        (state.ohms_ewma - state.min_ohms_ewma)/state.min_ohms_ewma }
-                    else { 1. }; // max rate of change
+        // we only update ohms_rate if minR drops
+        if state.ohms_ewma < state.min_ohms_ewma {
+            // normalize the rate as a percentage
+            state.ohms_rate = 
+                if state.min_ohms_ewma != INF_INTER_ELECTRODE_OHMS { 
+                    (state.ohms_ewma - state.min_ohms_ewma)/state.min_ohms_ewma }
+                else { 0. }; // max rate of change of declining minR
 
-                println!("{} minR -> {:.3} ({:.5} ... {:.5})", 
-                    end_drive_utc_dt.timestamp(), state.ohms_ewma, state.ohms_rate, state.ohms_rate_ewma);
-                state.min_ohms_ewma = state.ohms_ewma;
-                state.minr_update_ms = end_drive_ms;
-            }
+            println!("{} minR -> {:.3} ({:.5})", end_drive_utc_dt.timestamp(), state.ohms_ewma, state.ohms_rate);
+            state.min_ohms_ewma = state.ohms_ewma;
+            state.minr_update_ms = end_drive_ms;
         }
-
     }
     update_ewma(&mut state.ohms_rate_ewma, state.ohms_rate, MINR_RATE_EWMA_ALPHA);
 
@@ -566,9 +561,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     state.phase_gauge_end_utc, 
                     state.min_ohms_ewma, state.max_ohms_ewma, 
                     phase_duration_ms);
-                 // reset min-max for next phase
-                state.min_ohms_ewma = INF_INTER_ELECTRODE_OHMS;
-                state.max_ohms_ewma = 5.;
+                // provide a reference point for min-max for next phase
+                state.min_ohms_ewma = state.ohms_ewma;
+                state.max_ohms_ewma = state.ohms_ewma;
                 state.minr_update_ms = end_drive_ms;
             }
         }
