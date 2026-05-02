@@ -92,7 +92,7 @@ const INITIAL_ANCHORING_CURRENT_MA: f32 = 25.;
 /// Mean voltage to strive for, with constant voltage mode in Gauge phase
 const MEAN_CV_GAUGE_MV: f32 = 1.2 * 1000.;
 /// Mean voltage to strive for, with constant voltage mode in Growth phase
-const MEAN_CV_GROWTH_MV: f32 = 2.0 * 1000.;
+const MEAN_CV_GROWTH_MV: f32 = 2.2 * 1000.;
 
 /// Growth phase variable current amplitude +/- added to mean value
 const GROWTH_PHASE_VARIABLE_MA: f32 = 20.;
@@ -109,7 +109,7 @@ const GROWTH_PHASE_PERIOD_SEC: f32 = 12.; // 0.083 Hz  -- 12 second cycle
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
 
 const ENABLE_GROWTH_SWEEP: bool = false;
-const ENABLE_GROWTH_EXT_TRIGGER: bool = true;
+const ENABLE_GROWTH_EXT_TRIGGER: bool = false;
 const ENABLE_CONSTANT_VOLT_GROWTH: bool = true;
 
 /// Used after we think we've achieved a solid carbon bridge 
@@ -645,6 +645,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     }
                     else if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
                         new_drive_ma = MEAN_CV_GROWTH_MV / state.ohms_ewma;
+                    }
+                    else {
+                        new_drive_ma += 0.2;
                     }
                 }
                 else if ENABLE_GROWTH_SWEEP {
