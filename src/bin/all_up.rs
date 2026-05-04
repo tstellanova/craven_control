@@ -41,9 +41,9 @@ const AVG_PKPK_HEAT_CYCLE_MS: u64 = AVG_HEAT_CYCLE_DURATION_SEC * 1000;
 /// Time limit for warmup detection phase
 const WARMUP_PHASE_DUR_MS: u64 = (AVG_PKPK_HEAT_CYCLE_MS/4);
 /// Time limite for inter-electrode resistance gauging phase
-const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = AVG_PKPK_HEAT_CYCLE_MS/2;
+const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = AVG_PKPK_HEAT_CYCLE_MS / 2;
 /// Time limit for minimum resistance to drop during Growth phase
-const GROWTH_PHASE_MINR_LIMIT_MS: u64 = (0.6 * AVG_PKPK_HEAT_CYCLE_MS as f64) as u64;
+const GROWTH_PHASE_MINR_LIMIT_MS: u64 = AVG_PKPK_HEAT_CYCLE_MS / 4;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -93,7 +93,7 @@ const PROBE_CURRENT_MA: f32 = 1.;
 /// Fixed Warmup phase current
 const WARMUP_CURRENT_MA: f32 = 5.;
 /// Used to gauge the initial (presumably zero-growth) inter-electrode resistance
-const GAUGE_MIN_CURRENT_MA: f32 = 5. ; 
+const GAUGE_MIN_CURRENT_MA: f32 = 10. ; 
 /// Used when bridge has formed across electrodes
 const BRIDGE_CHECK_MA: f32 = 10. ;
 
@@ -608,7 +608,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
 
             // continue probing over multiple heat/cool cycles to characterize resistance
-            if state.ohms_ewma < MIN_INTER_ELECTRODE_OHMS {
+            if state.ohms_ewma < GROWTH_TERMINATION_OHMS {
                 trans_bridge_check(state, 
                     end_drive_ms, end_drive_utc_dt.timestamp(), phase_duration_ms);
             }
@@ -732,7 +732,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     zero_control_outputs(&mut ctx).await?;
 
     let start_time = chrono::Utc::now().timestamp();
-    let log_out_filename = format!("allup47_01_{}_log.csv",start_time);
+    let log_out_filename = format!("allup47_02_{}_log.csv",start_time);
     println!("Recording data to {log_out_filename:?} ...");
     if ENABLE_GROWTH_SWEEP {
         println!("Mean {:.2} mA, Variable {:.2} mA, sweep {:?}, period {}, ext_trig {:?}",
