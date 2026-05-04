@@ -43,7 +43,7 @@ const WARMUP_PHASE_DUR_MS: u64 = (AVG_PKPK_HEAT_CYCLE_MS/4);
 /// Time limite for inter-electrode resistance gauging phase
 const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = AVG_PKPK_HEAT_CYCLE_MS/2;
 /// Time limit for minimum resistance to drop during Growth phase
-const GROWTH_PHASE_MINR_LIMIT_MS: u64 = (1.1 * AVG_PKPK_HEAT_CYCLE_MS as f64) as u64;
+const GROWTH_PHASE_MINR_LIMIT_MS: u64 = (0.6 * AVG_PKPK_HEAT_CYCLE_MS as f64) as u64;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -99,9 +99,9 @@ const BRIDGE_CHECK_MA: f32 = 10. ;
 
 
 /// Mean voltage to strive for, with constant voltage mode in Gauge phase
-const MEAN_CV_GAUGE_MV: f32 = 1.0 * 1000.;
+const MEAN_CV_GAUGE_MV: f32 = 1.2 * 1000.;
 /// Mean voltage to strive for, with constant voltage mode in Growth phase
-const MEAN_CV_GROWTH_MV: f32 = 2.2 * 1000.;
+const MEAN_CV_GROWTH_MV: f32 = 2.4 * 1000.;
 
 /// Growth phase variable current amplitude +/- added to mean value
 const GROWTH_PHASE_VARIABLE_MA: f32 = 20.;
@@ -433,14 +433,15 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
     }
     let measured_volts = total_volts / 3.;
 
-    let measured_milliamps: f32 = 
+    let mut measured_milliamps: f32 = 
         if state.target_drive_ma > 0.  && state.reported_drive_ma > REPORTED_CURRENT_THRESHOLD_MA  
         {  total_milliamps / 3. }  
         else { 0. };
 
-    let mr_current_gap_ma = (state.reported_drive_ma - measured_milliamps).abs();
-    if mr_current_gap_ma > 2. * MIN_DRIVE_CURRENT_INCR_MA {
-        println!("mr_current_gap_ma: {:.1}", mr_current_gap_ma);
+    let mr_current_gap_pct = (state.reported_drive_ma - measured_milliamps)/state.reported_drive_ma;
+    if mr_current_gap_pct > 0.04 {
+        println!("mr_current_gap_pct: {:.3}", mr_current_gap_pct);
+        measured_milliamps = state.reported_drive_ma;
     }
 
     let measured_ohms = 
@@ -466,7 +467,7 @@ fn trans_gauge_phase(state: &mut ElectrodeState, trans_start_ms: i64, trans_utc:
     state.phase_start_ms = trans_start_ms;
     state.phase_gauge_start_utc = trans_utc;
     println!("{} start Gauge phase w/ Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms) ",
-        trans_start_ms,  
+        trans_utc,  
         state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
         prior_duration_ms);
     // provide a reference point for min-max for next phase
@@ -485,7 +486,7 @@ fn trans_growth_phase(state: &mut ElectrodeState, trans_start_ms: i64, trans_utc
     state.phase_start_ms = trans_start_ms;
     state.phase_growth_start_utc = trans_utc;
     println!("{} start Growth phase w/ Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms) ",
-        state.phase_growth_start_utc,
+        trans_utc,
         state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
         prior_duration_ms);
     // provide a reference point for min-max for next phase
@@ -504,7 +505,7 @@ fn trans_bridge_check(state: &mut ElectrodeState, trans_start_ms: i64, trans_utc
     state.phase_start_ms = trans_start_ms;
     state.phase_bridge_start_utc = trans_utc;
     println!("{} start Bridged phase w/ Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms) ",
-        state.phase_bridge_start_utc, 
+        trans_utc, 
         state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
         prior_duration_ms
     );
@@ -731,7 +732,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     zero_control_outputs(&mut ctx).await?;
 
     let start_time = chrono::Utc::now().timestamp();
-    let log_out_filename = format!("{}_recorder.csv",start_time);
+    let log_out_filename = format!("allup47_01_{}_log.csv",start_time);
     println!("Recording data to {log_out_filename:?} ...");
     if ENABLE_GROWTH_SWEEP {
         println!("Mean {:.2} mA, Variable {:.2} mA, sweep {:?}, period {}, ext_trig {:?}",
