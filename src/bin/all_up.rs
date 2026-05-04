@@ -732,7 +732,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     zero_control_outputs(&mut ctx).await?;
 
     let start_time = chrono::Utc::now().timestamp();
-    let log_out_filename = format!("allup47_02_{}_log.csv",start_time);
+    let log_out_filename = format!("allup47_03_{}_log.csv",start_time);
     println!("Recording data to {log_out_filename:?} ...");
     if ENABLE_GROWTH_SWEEP {
         println!("Mean {:.2} mA, Variable {:.2} mA, sweep {:?}, period {}, ext_trig {:?}",
