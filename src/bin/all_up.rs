@@ -38,10 +38,12 @@ const CURRENT_PULSE_OFF_TIME: Duration = Duration::from_millis(5);
 const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 260;
 const AVG_PKPK_HEAT_CYCLE_MS: u64 = AVG_HEAT_CYCLE_DURATION_SEC * 1000;
 
+/// Time limit for warmup detection phase
+const WARMUP_PHASE_DUR_MS: u64 = (AVG_PKPK_HEAT_CYCLE_MS/4);
 /// Time limite for inter-electrode resistance gauging phase
-const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = 2*AVG_PKPK_HEAT_CYCLE_MS;
+const GAUGE_RESISTANCE_PHASE_DUR_MS: u64 = AVG_PKPK_HEAT_CYCLE_MS/2;
 /// Time limit for minimum resistance to drop during Growth phase
-const GROWTH_PHASE_MINR_LIMIT_MS: u64 = AVG_PKPK_HEAT_CYCLE_MS;
+const GROWTH_PHASE_MINR_LIMIT_MS: u64 = (1.1 * AVG_PKPK_HEAT_CYCLE_MS as f64) as u64;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -62,9 +64,12 @@ const EXCESSIVE_HEAT_TEMP_C:f32 = 800.;
 const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 12.5;
 const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 7.5;
 
-
 /// If the electrodes were shorted together at melt temperature, what resistance do we expect?
 const MIN_INTER_ELECTRODE_OHMS: f32 = 2.;
+
+const GROWTH_TERMINATION_OHMS: f32 = 2. * MIN_INTER_ELECTRODE_OHMS ;
+
+const BRIDGED_TERMINATION_OHMS: f32 =  5. * MIN_INTER_ELECTRODE_OHMS;
 
 /// The EWMA of the minR change rate drops below this value when a bridge forms across electrodes
 // const BRIDGE_OHM_RATE_CLIFF: f32 = -0.03;
@@ -90,13 +95,13 @@ const WARMUP_CURRENT_MA: f32 = 5.;
 /// Used to gauge the initial (presumably zero-growth) inter-electrode resistance
 const GAUGE_MIN_CURRENT_MA: f32 = 5. ; 
 /// Used when bridge has formed across electrodes
-const BRIDGE_CHECK_MA: f32 = 5. ;
+const BRIDGE_CHECK_MA: f32 = 10. ;
 
 
 /// Mean voltage to strive for, with constant voltage mode in Gauge phase
-const MEAN_CV_GAUGE_MV: f32 = 1.2 * 1000.;
+const MEAN_CV_GAUGE_MV: f32 = 1.0 * 1000.;
 /// Mean voltage to strive for, with constant voltage mode in Growth phase
-const MEAN_CV_GROWTH_MV: f32 = 1.4 * 1000.;
+const MEAN_CV_GROWTH_MV: f32 = 2.2 * 1000.;
 
 /// Growth phase variable current amplitude +/- added to mean value
 const GROWTH_PHASE_VARIABLE_MA: f32 = 20.;
@@ -433,6 +438,11 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
         {  total_milliamps / 3. }  
         else { 0. };
 
+    let mr_current_gap_ma = (state.reported_drive_ma - measured_milliamps).abs();
+    if mr_current_gap_ma > 2. * MIN_DRIVE_CURRENT_INCR_MA {
+        println!("mr_current_gap_ma: {:.1}", mr_current_gap_ma);
+    }
+
     let measured_ohms = 
         if measured_milliamps > 0. {
             // this also covers the case where volts = 0.0, i.e. zero resistance.
@@ -576,7 +586,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Warmup => {
             // while the melt is warming up, monitor the current throughput 
             new_drive_ma = WARMUP_CURRENT_MA;
-            if phase_duration_ms > 30000 && state.measured_ma > (new_drive_ma / 2.)  {
+            if phase_duration_ms > WARMUP_PHASE_DUR_MS && state.measured_ma > (new_drive_ma / 2.)  {
                 new_drive_ma = trans_gauge_phase(
                     state, end_drive_ms, end_drive_utc_dt.timestamp(),phase_duration_ms);
             }
@@ -585,16 +595,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::GaugeResistance => {
+            new_drive_ma = GAUGE_MIN_CURRENT_MA;
+            
             // calculate current value for (nearly) constant voltage
             if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
-                let last_drive_mv = state.ohms_ewma * state.target_drive_ma;
-                // slowly ramp up voltage during GaugeResistance phase
-                if last_drive_mv < MEAN_CV_GAUGE_MV {
-                    new_drive_ma = state.target_drive_ma + MIN_DRIVE_CURRENT_INCR_MA/2.;
-                }
-                else if last_drive_mv > MEAN_CV_GAUGE_MV {
-                    new_drive_ma = state.target_drive_ma - MIN_DRIVE_CURRENT_INCR_MA;
-                }
+                new_drive_ma = MEAN_CV_GAUGE_MV / state.ohms_ewma;
             }
             else {
                 // return to nonzero drive current
@@ -614,29 +619,21 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Growth => {  
             let minr_drop_delay = if end_drive_ms > state.minr_update_ms { end_drive_ms - state.minr_update_ms } else { 0};
             let growth_stalled = (minr_drop_delay > GROWTH_PHASE_MINR_LIMIT_MS as i64);
-            let bridge_formed =   state.ohms_rate_ewma < BRIDGE_OHM_RATE_CLIFF  || state.ohms_ewma < MIN_INTER_ELECTRODE_OHMS;
+            let bridge_formed =    state.ohms_ewma < GROWTH_TERMINATION_OHMS;
 
             if bridge_formed || growth_stalled {
+                new_drive_ma = (state.target_drive_ma + BRIDGE_CHECK_MA)/2.;
                 trans_bridge_check(state, 
                     end_drive_ms, end_drive_utc_dt.timestamp(),  phase_duration_ms);
             }
             else {
                 if ENABLE_CONSTANT_VOLT_GROWTH {
                     // calculate current value for (nearly) constant voltage
-                    if ENABLE_GROWTH_EXT_TRIGGER {
-                        let measured_mv = state.measured_volts * 1000.;
-                        if measured_mv > MEAN_CV_GROWTH_MV {
-                            new_drive_ma -= MIN_DRIVE_CURRENT_INCR_MA;
-                        }
-                        else if measured_mv < MEAN_CV_GROWTH_MV {
-                            new_drive_ma += 3. * MIN_DRIVE_CURRENT_INCR_MA;
-                        }
-                    }
-                    else if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
+                    if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
                         new_drive_ma = MEAN_CV_GROWTH_MV / state.ohms_ewma;
                     }
                     else {
-                        new_drive_ma += 0.2;
+                        new_drive_ma = 50.;
                     }
                 }
                 else if ENABLE_GROWTH_SWEEP {
@@ -657,14 +654,18 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Bridged => {
            if new_drive_ma > (BRIDGE_CHECK_MA + MIN_DRIVE_CURRENT_INCR_MA) {
                 // slowly reduce the current down to check current
-                new_drive_ma -= MIN_DRIVE_CURRENT_INCR_MA;
+                new_drive_ma = (new_drive_ma + BRIDGE_CHECK_MA)/2.;
             }
             else {
                 // verify the resistance at the check current
-                if state.ohms_ewma > 5. * MIN_INTER_ELECTRODE_OHMS {
+                if state.ohms_ewma > BRIDGED_TERMINATION_OHMS {
+                    // restart growth sequence because measured resistance is higher than expected
+                    trans_growth_phase(state, 
+                    end_drive_ms, end_drive_utc_dt.timestamp(), phase_duration_ms);
+ 
                     // restart gauge-growth sequence because resistance is higher than expected
-                    new_drive_ma = trans_gauge_phase( state, 
-                        end_drive_ms,end_drive_utc_dt.timestamp(),phase_duration_ms);
+                    // new_drive_ma = trans_gauge_phase( state, 
+                    //     end_drive_ms,end_drive_utc_dt.timestamp(),phase_duration_ms);
                 }
                 else {
                     // the bridge really does have very low resistance -- we're done
