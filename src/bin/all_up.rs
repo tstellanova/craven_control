@@ -630,7 +630,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 if ENABLE_CONSTANT_VOLT_GROWTH {
                     // calculate current value for (nearly) constant voltage
                     if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
-                        new_drive_ma = MEAN_CV_GROWTH_MV / state.ohms_ewma;
+                        let mean_lower_ohms = (state.ohms_ewma + state.min_ohms_ewma)/2.;
+                        new_drive_ma = MEAN_CV_GROWTH_MV / mean_lower_ohms;
                     }
                     else {
                         new_drive_ma = 50.;
