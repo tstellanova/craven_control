@@ -587,7 +587,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     }
                 }
                 else if ENABLE_GROWTH_SWEEP {
-                    new_drive_ma = growth_current_at_time_ms(end_drive_ms , state.phase_start_ms);
+                    new_drive_ma = growth_current_at_time_ms(end_drive_ms , state.phase_start_ms,
+                        GROWTH_PHASE_MEAN_MA, GROWTH_PHASE_VARIABLE_MA);
                 }
 
                 if ENABLE_EXT_TRIGGER  {
@@ -649,10 +650,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
 ///
 /// Calculate the value of the desired growth current at a given time
-fn growth_current_at_time_ms(timestamp_ms: i64, zero_ms: i64) -> f32
+fn growth_current_at_time_ms(timestamp_ms: i64, zero_ms: i64, mean_val: f32, variable_val: f32) -> f32
 {
     let offset_time_sec: f32 = ((timestamp_ms  - zero_ms) as f32)/1000.;
-    let current = GROWTH_PHASE_MEAN_MA + GROWTH_PHASE_VARIABLE_MA * ((TAU * GROWTH_PHASE_SWEEP_FREQUENCY * offset_time_sec ).sin());
+    let current = mean_val + variable_val * ((TAU * GROWTH_PHASE_SWEEP_FREQUENCY * offset_time_sec ).sin());
     current
 }
 
