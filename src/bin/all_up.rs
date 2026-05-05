@@ -67,7 +67,7 @@ const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 7.5;
 /// If the electrodes were shorted together at melt temperature, what resistance do we expect?
 const MIN_INTER_ELECTRODE_OHMS: f32 = 2.;
 /// Minimum resistance we expect in the high-potential Growth phase
-const GROWTH_TERMINAL_OHMS: f32 = 1.5 * MIN_INTER_ELECTRODE_OHMS ;
+const GROWTH_TERMINAL_OHMS: f32 = 5.5 ;
 /// Below this resistance value we terminate the Bridged phase
 const BRIDGED_TERMINATION_OHMS: f32 =  4. * MIN_INTER_ELECTRODE_OHMS;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
@@ -427,10 +427,12 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
         else { 0. };
 
     // sanity check that measured current is close to (current source reported) drive current
-    let mr_current_gap_frac = (state.reported_drive_ma - measured_milliamps)/state.reported_drive_ma;
-    if mr_current_gap_frac > 0.04 {
-        println!("mr_current_gap : {:.3}", mr_current_gap_frac);
-        measured_milliamps = state.reported_drive_ma;
+    if state.reported_drive_ma > 2.*MIN_DRIVE_CURRENT_INCR_MA {
+        let mr_current_gap_frac = (state.reported_drive_ma - measured_milliamps)/state.reported_drive_ma;
+        if mr_current_gap_frac > 0.04 {
+            println!("mr_current_gap : {:.3}", mr_current_gap_frac);
+            measured_milliamps = state.reported_drive_ma;
+        }
     }
 
     let measured_ohms = 
@@ -526,7 +528,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
 
         // We only update the "actual" minimum resistance during the Gauge phase
-        if state.drive_phase == DrivePhase::Gauge {
+        if state.drive_phase == DrivePhase::Gauge || state.drive_phase == DrivePhase::Warmup {
             if state.ohms_ewma < state.min_ohms_ewma {
                 println!("{} minR -> {:.3} )", end_drive_utc_dt.timestamp(), state.ohms_ewma);
                 state.min_ohms_ewma = state.ohms_ewma;
@@ -545,9 +547,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             // while the melt is warming up, monitor the current throughput 
             new_drive_ma = WARMUP_CURRENT_MA;
             if phase_duration_ms > WARMUP_PHASE_DUR_MS && state.measured_ma > (new_drive_ma / 2.)  {
-                // seed the beginning of the gauge-growth cycle with a starting min_ohms_ewma
-                state.min_ohms_ewma = state.ohms_ewma;
-                state.minr_update_ms = end_drive_ms;
                 trans_gauge_phase(
                     state, end_drive_ms, end_drive_utc_dt.timestamp(),phase_duration_ms);
             }
@@ -581,7 +580,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
                         // overdrive the current a little bit until we get near termination
                         let virtual_resistance_ohms  = 
-                            if state.ohms_ewma  > GROWTH_TERMINAL_OHMS { state.ohms_ewma - GROWTH_TERMINAL_OHMS }
+                            if state.ohms_ewma  > GROWTH_TERMINAL_OHMS { state.ohms_ewma - 2. }
                             else { state.ohms_ewma };
                         new_drive_ma = MEAN_CV_GROWTH_MV / virtual_resistance_ohms;
                     }
