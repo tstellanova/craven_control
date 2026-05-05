@@ -345,7 +345,7 @@ pub struct ElectrodeState {
     min_ohms_ewma: f32,
     /// The last time the min_ohms_ewma changed
     minr_update_ms: i64,
-    /// Maximum value of inter-electrode resistance at start of growth phase
+    /// Maximum value of inter-electrode resistance
     max_ohms_ewma: f32,
 
     /// The drive current to send to the electrodes
@@ -408,10 +408,7 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
 
     // println!("drive_phase: {:?} r_ma: {:.3}", state.drive_phase, state.reported_drive_ma);
 
-    // let (measured_volts, measured_milliamps) =
-    //     read_wdcu3003_iv_adc(ctx).await?;
-
-    // Measure the resulting induced current and potential across the electrodes
+    // Measure the average resulting induced current and potential across the electrodes
     let mut total_volts = 0.;
     let mut total_milliamps = 0.;
     for i in 0..3 {
@@ -421,13 +418,15 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
         total_milliamps += step_milliamps;
         sleep(CURRENT_SOURCE_STABILIZATION_TIME);
     }
+    // average of multiple potential samples
     let measured_volts = total_volts / 3.;
-
+    // average of multiple current samples
     let mut measured_milliamps: f32 = 
         if state.target_drive_ma > 0.  && state.reported_drive_ma > REPORTED_CURRENT_THRESHOLD_MA  
         {  total_milliamps / 3. }  
         else { 0. };
 
+    // sanity check that measured current is close to (current source reported) drive current
     let mr_current_gap_frac = (state.reported_drive_ma - measured_milliamps)/state.reported_drive_ma;
     if mr_current_gap_frac > 0.04 {
         println!("mr_current_gap : {:.3}", mr_current_gap_frac);
@@ -459,7 +458,6 @@ fn trans_gauge_phase(state: &mut ElectrodeState, trans_start_ms: i64, trans_utc:
         trans_utc,  
         state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
         prior_duration_ms);
-    // provide a reference point for min-max for next phase
     state.max_ohms_ewma = state.ohms_ewma;
 }
 
@@ -475,7 +473,6 @@ fn trans_growth_phase(state: &mut ElectrodeState, trans_start_ms: i64, trans_utc
         trans_utc,
         state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
         prior_duration_ms);
-
 }
 
 ///
@@ -491,7 +488,7 @@ fn trans_bridge_check(state: &mut ElectrodeState, trans_start_ms: i64, trans_utc
         state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
         prior_duration_ms
     );
-
+    state.max_ohms_ewma = state.ohms_ewma;
 }
 
 /// 
