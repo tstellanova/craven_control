@@ -530,7 +530,7 @@ fn trans_bridge_check(state: &mut ElectrodeState, trans_start_ms: i64, trans_utc
 fn trans_cyclic_phase(state: &mut ElectrodeState, trans_utc: DateTime<chrono::Utc>, prior_duration_ms: u64)
 -> f32
 {
-    state.drive_phase = DrivePhase::Holding;
+    state.drive_phase = DrivePhase::Cyclic;
     state.phase_start_ms = trans_utc.timestamp_millis();
     state.phase_cyclic_start_utc = trans_utc.timestamp();
     println!("{} start Cyclic phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
@@ -621,7 +621,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 }
 
                 if ENABLE_CYCLIC_GROWTH {
-                    trans_cyclic_phase(state, end_drive_utc_dt, phase_duration_ms);
+                    new_drive_ma = trans_cyclic_phase(state, end_drive_utc_dt, phase_duration_ms);
                 }
                 else {
                     trans_gauge_phase(
@@ -634,7 +634,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
         DrivePhase::Cyclic => {
             // TODO first, check for actual minR if volts == floor
-            let goal_drive_volts = CYCLOID_VLUT.voltage_at_ms(end_drive_ms) as f32;
+            let goal_drive_volts = CYCLOID_VLUT.voltage_at_ms(phase_duration_ms as i64) as f32;
             // calculate current value for (nearly) constant voltage
             if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
                  // overdrive the current a little bit until we get near termination
@@ -659,6 +659,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                                 phase_duration_ms);
                     }
                 }
+                println!("drive : {:.2} V  versus {:.2} Ohms", goal_drive_volts, virtual_resistance_ohms);
             }
             else {
                 println!("{} cyclic fallback at {:.2}", end_drive_utc_dt.timestamp(), state.ohms_ewma);
