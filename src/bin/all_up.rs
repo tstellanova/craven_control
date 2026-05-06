@@ -116,6 +116,7 @@ const MEAN_CV_GROWTH_MV: f32 = 2.4 * 1000.;
 
 const CYCLOID_GROWTH_PEAK_V: f32 = 2.7;
 const CYCLOID_GROWTH_FLOOR_V: f32 = 0.8;
+const CYCLIC_MINR_MEASURE_V: f32 = 0.9;
 const CYCLOID_GROWTH_PERIOD_S: u32 = (AVG_HEAT_CYCLE_DURATION_SEC / 4) as u32 ;
 
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
@@ -643,7 +644,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 new_drive_ma = (goal_drive_volts * 1000.) / virtual_resistance_ohms;
 
                 // check for cyclic growth termination condition
-                if state.measured_volts <= CYCLOID_GROWTH_FLOOR_V {
+                if state.measured_volts <= CYCLIC_MINR_MEASURE_V {
                     if state.ohms_ewma < state.min_ohms_ewma {
                         println!("{} {:.2} V, minR -> {:.3} ", 
                             end_drive_utc_dt.timestamp(), state.measured_volts, state.ohms_ewma);
@@ -782,8 +783,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Recording data to {log_out_filename:?} ...");
 
     if ENABLE_CYCLIC_GROWTH {
-        println!("Cyclic growth mode. Peak {:.2} V, Floor {:.2} V,  Period: {} sec",
-            CYCLOID_GROWTH_PEAK_V, CYCLOID_GROWTH_FLOOR_V , CYCLOID_GROWTH_PERIOD_S);
+        println!("Cyclic growth mode. Peak {:.2} V, Floor {:.2} V, Period: {} sec, Meas {:.2} V,Term {:.2} Ω",
+            CYCLOID_GROWTH_PEAK_V, CYCLOID_GROWTH_FLOOR_V , CYCLOID_GROWTH_PERIOD_S, CYCLIC_MINR_MEASURE_V, CYCLIC_TERMINATION_OHMS);
     }
     else if ENABLE_CONSTANT_VOLT_GROWTH {
        println!("Constant Voltage mode. Gauge {:.2} mV, Growth {:.2} mV,  ext_trig {:?}",
