@@ -6,6 +6,7 @@ use std::process::exit;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
+use chrono::DateTime;
 use tokio::time::{sleep, sleep_until};
 use tokio_modbus::prelude::*;
 
@@ -17,6 +18,7 @@ use ctrlc;
 use std::sync::mpsc::channel;
 use approx::{AbsDiff, abs_diff_ne};
 use craven_control::*;
+use std::sync::LazyLock;
 
 
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
@@ -74,6 +76,10 @@ const GAUGE_TERMINATION_OHMS: f32 = 4.5;
 
 /// Below this resistance value we terminate the Bridged phase
 const BRIDGED_TERMINATION_OHMS: f32 = 3.0;
+
+/// Below this resistance value we terminate the Cyclic phase
+const CYCLIC_TERMINATION_OHMS: f32 = 4.0;
+
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
 
@@ -100,13 +106,17 @@ const GROWTH_PHASE_VARIABLE_MA: f32 = 20.;
 /// Growth phase mean current value
 const GROWTH_PHASE_MEAN_MA: f32 = 200.;
 
+/// Fall back to this current value when resistance is unknown
+const CYCLIC_PHASE_FALLBACK_MA: f32 = 55.;
 
 /// Mean voltage to strive for, with constant voltage mode in Gauge phase
 const MEAN_CV_GAUGE_MV: f32 = 1.2 * 1000.;
 /// Mean voltage to strive for, with constant voltage mode in Growth phase
 const MEAN_CV_GROWTH_MV: f32 = 2.4 * 1000.;
 
-
+const CYCLOID_GROWTH_PEAK_V: f32 = 2.7;
+const CYCLOID_GROWTH_FLOOR_V: f32 = 0.8;
+const CYCLOID_GROWTH_PERIOD_S: u32 = (AVG_HEAT_CYCLE_DURATION_SEC / 4) as u32 ;
 
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 16.; // 0.062 Hz  -- 16 second cycle
@@ -119,7 +129,8 @@ const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC);
 
 const ENABLE_GROWTH_SWEEP: bool = false;
 const ENABLE_EXT_TRIGGER: bool = false;
-const ENABLE_CONSTANT_VOLT_GROWTH: bool = true;
+const ENABLE_CONSTANT_VOLT_GROWTH: bool = false;
+const ENABLE_CYCLIC_GROWTH: bool = true;
 
 /// Used after we think we've achieved a solid carbon bridge 
 const HOLDING_PROBE_CURRENT_MA: f32 = 2. * MIN_DRIVE_CURRENT_INCR_MA;
@@ -131,6 +142,14 @@ const REPORTED_CURRENT_THRESHOLD_MA: f32 = MIN_DRIVE_CURRENT_INCR_MA;
 /// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
 const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
 
+/// Potential vs time LUT calculated once
+static CYCLOID_VLUT: LazyLock<CycloidLut> = LazyLock::new(|| {
+    CycloidLut::create_with(
+        CYCLOID_GROWTH_PERIOD_S, 
+        CYCLOID_GROWTH_PEAK_V,
+        CYCLOID_GROWTH_FLOOR_V,
+        1000)
+});
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -201,14 +220,16 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
 enum DrivePhase {
     /// check that the electrode is immersed in conductive melt
     Warmup = 0, 
+    /// Cyclical growth/measure cycle
+    Cyclic = 1,
     /// Measure resistance between electrodes at low current
-    Gauge = 1,
+    Gauge = 2,
      /// Growth of carbon chains between electrodes
-    Growth = 2,
+    Growth = 3,
     /// Verify resistance between electrodes at very low current
-    Bridged = 3, 
+    Bridged = 4, 
     /// Monitor the inter-electrode conductivity
-    Holding = 4, 
+    Holding = 5, 
 } 
 
  /// 
@@ -335,6 +356,7 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
 }
 
 
+
 #[derive(Debug, Clone)]
 pub struct ElectrodeState {
     drive_phase: DrivePhase,
@@ -368,6 +390,8 @@ pub struct ElectrodeState {
     phase_growth_start_utc: i64,
     /// Timestamp when Bridge phase started
     phase_bridge_start_utc: i64,
+    /// Timestamp when Cyclic phase started
+    phase_cyclic_start_utc: i64,
     /// Timestamp when Holding phase started
     phase_holding_start_utc: i64,
 }
@@ -391,6 +415,7 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             phase_gauge_start_utc: 0,
             phase_growth_start_utc: 0,
             phase_bridge_start_utc: 0,
+            phase_cyclic_start_utc: 0,
             phase_holding_start_utc: 0,
         }; 
 
@@ -499,6 +524,37 @@ fn trans_bridge_check(state: &mut ElectrodeState, trans_start_ms: i64, trans_utc
     state.max_ohms_ewma = state.ohms_ewma;
 }
 
+
+/// Switch to Cyclic drive phase
+fn trans_cyclic_phase(state: &mut ElectrodeState, trans_utc: DateTime<chrono::Utc>, prior_duration_ms: u64)
+-> f32
+{
+    state.drive_phase = DrivePhase::Holding;
+    state.phase_start_ms = trans_utc.timestamp_millis();
+    state.phase_cyclic_start_utc = trans_utc.timestamp();
+    println!("{} start Cyclic phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
+        state.phase_cyclic_start_utc, 
+        state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
+        prior_duration_ms
+    );
+    CYCLIC_PHASE_FALLBACK_MA
+}
+
+/// Switch to Holding drive phase
+fn trans_holding_phase(state: &mut ElectrodeState, trans_utc: DateTime<chrono::Utc>, prior_duration_ms: u64)
+-> f32
+{
+    state.drive_phase = DrivePhase::Holding;
+    state.phase_start_ms = trans_utc.timestamp_millis();
+    state.phase_holding_start_utc = trans_utc.timestamp();
+    println!("{} start Holding phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
+        state.phase_holding_start_utc, 
+        state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
+        prior_duration_ms
+    );
+    HOLDING_PROBE_CURRENT_MA
+}
+
 /// 
 /// Adjust the electrode current based on melt condition and drive phase
 /// 
@@ -555,16 +611,57 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             // while the melt is warming up, monitor the current throughput 
             new_drive_ma = WARMUP_CURRENT_MA;
             if phase_duration_ms > WARMUP_PHASE_DUR_MS && state.measured_ma > (new_drive_ma / 2.)  {
-                if state.ohms_ewma > 0. {
+                if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
                     state.min_ohms_ewma = state.ohms_ewma;
                 }
-                else { state.min_ohms_ewma = 100.; }
+                else { 
+                    state.ohms_ewma = 100.;
+                    state.min_ohms_ewma = 100.; 
+                }
 
-                trans_gauge_phase(
-                    state, end_drive_ms, end_drive_utc_dt.timestamp(),phase_duration_ms);
+                if ENABLE_CYCLIC_GROWTH {
+                    trans_cyclic_phase(state, end_drive_utc_dt, phase_duration_ms);
+                }
+                else {
+                    trans_gauge_phase(
+                        state, end_drive_ms, end_drive_utc_dt.timestamp(),phase_duration_ms);
+                }
             }
             else {
                 println!("Warmup duration: {} sec", phase_duration_ms/1000);
+            }
+        }
+        DrivePhase::Cyclic => {
+            // TODO first, check for actual minR if volts == floor
+            let goal_drive_volts = CYCLOID_VLUT.voltage_at_ms(end_drive_ms) as f32;
+            // calculate current value for (nearly) constant voltage
+            if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
+                 // overdrive the current a little bit until we get near termination
+                let virtual_resistance_ohms  = 
+                    if state.ohms_ewma > CYCLIC_TERMINATION_OHMS { state.ohms_ewma - (CYCLIC_TERMINATION_OHMS-1.) }
+                    else { state.ohms_ewma };
+                new_drive_ma = (goal_drive_volts * 1000.) / virtual_resistance_ohms;
+
+                // check for cyclic growth termination condition
+                if state.measured_volts <= CYCLOID_GROWTH_FLOOR_V {
+                    if state.ohms_ewma < state.min_ohms_ewma {
+                        println!("{} {:.2} V, minR -> {:.3} ", 
+                            end_drive_utc_dt.timestamp(), state.measured_volts, state.ohms_ewma);
+                        state.min_ohms_ewma = state.ohms_ewma;
+                        state.minr_update_ms = end_drive_ms;
+                    }
+
+                    if state.ohms_ewma < CYCLIC_TERMINATION_OHMS {
+                        new_drive_ma =
+                            trans_holding_phase(state, 
+                                end_drive_utc_dt,
+                                phase_duration_ms);
+                    }
+                }
+            }
+            else {
+                println!("{} cyclic fallback at {:.2}", end_drive_utc_dt.timestamp(), state.ohms_ewma);
+                new_drive_ma = CYCLIC_PHASE_FALLBACK_MA;
             }
         }
         DrivePhase::Gauge => {
@@ -615,6 +712,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 }
             }
         }
+        
         DrivePhase::Bridged => {
             // slowly reduce the current down to a very low check value, then check the resistance
            if new_drive_ma > BRIDGE_CHECK_MA {
@@ -630,19 +728,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 }
                 else {
                     // the bridge really does have very low resistance at low current -- we're done
-                    if state.ext_trigger_powered {
-                        toggle_ext_current_trigger(ctx, false).await?;
-                        state.ext_trigger_powered = false;
-                    }
-                    state.drive_phase = DrivePhase::Holding;
-                    state.phase_start_ms = end_drive_ms;
-                    state.phase_holding_start_utc = end_drive_utc_dt.timestamp();
-                    new_drive_ma = HOLDING_PROBE_CURRENT_MA;
-                    println!("{} end Bridge phase with  R {:.2} ({} ms)", 
-                        state.phase_holding_start_utc, 
-                        state.ohms_ewma, 
-                        phase_duration_ms
-                    );
+                    new_drive_ma = 
+                      trans_holding_phase(state, end_drive_utc_dt, phase_duration_ms);
+
                 }
             }
         }
@@ -692,18 +780,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_time = chrono::Utc::now().timestamp();
     let log_out_filename = format!("{}_log.csv",start_time);
     println!("Recording data to {log_out_filename:?} ...");
-    if ENABLE_GROWTH_SWEEP {
-        println!("Mean {:.2} mA, Variable {:.2} mA, sweep {:?}, period {}, ext_trig {:?}",
-            GROWTH_PHASE_MEAN_MA, GROWTH_PHASE_VARIABLE_MA, ENABLE_GROWTH_SWEEP, GROWTH_PHASE_PERIOD_SEC, ENABLE_EXT_TRIGGER);
+
+    if ENABLE_CYCLIC_GROWTH {
+        println!("Cyclic growth mode. Peak {:.2} V, Floor {:.2} V,  Period: {} sec",
+            CYCLOID_GROWTH_PEAK_V, CYCLOID_GROWTH_FLOOR_V , CYCLOID_GROWTH_PERIOD_S);
     }
-    if ENABLE_CONSTANT_VOLT_GROWTH {
+    else if ENABLE_CONSTANT_VOLT_GROWTH {
        println!("Constant Voltage mode. Gauge {:.2} mV, Growth {:.2} mV,  ext_trig {:?}",
             MEAN_CV_GAUGE_MV, MEAN_CV_GROWTH_MV , ENABLE_EXT_TRIGGER);
+    }
+    else if ENABLE_GROWTH_SWEEP {
+        println!("Sweep Mean {:.2} mA, Variable {:.2} mA, sweep {:?}, period {}, ext_trig {:?}",
+            GROWTH_PHASE_MEAN_MA, GROWTH_PHASE_VARIABLE_MA, ENABLE_GROWTH_SWEEP, GROWTH_PHASE_PERIOD_SEC, ENABLE_EXT_TRIGGER);
     }
     else {
         println!("Current mode. Mean {:.2} mA, Variable {:.2} mA, sweep {:?}, period {}, ext_trig {:?}",
             GROWTH_PHASE_MEAN_MA, GROWTH_PHASE_VARIABLE_MA, ENABLE_GROWTH_SWEEP, GROWTH_PHASE_PERIOD_SEC, ENABLE_EXT_TRIGGER);
     }
+
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
@@ -725,6 +819,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut furnace_state = INITIAL_FURNACE_STATE;
     let mut electrode_state =  INITIAL_ELECTRODE_STATE;
+
+    // precalculate lookup table of Voltage vs time for cycloid potential
+    LazyLock::force(&CYCLOID_VLUT);
+
     electrode_state.phase_start_ms =  chrono::Utc::now().timestamp_millis();
 
     let mut loop_count = 0;
