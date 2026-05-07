@@ -116,10 +116,10 @@ const MEAN_CV_GAUGE_MV: f32 = 1.2 * 1000.;
 /// Mean voltage to strive for, with constant voltage mode in Growth phase
 const MEAN_CV_GROWTH_MV: f32 = 2.4 * 1000.;
 
-const CYCLOID_GROWTH_PEAK_V: f32 = 2.8;
-const CYCLOID_GROWTH_FLOOR_V: f32 = 0.75;
+const CYCLOID_GROWTH_PEAK_V: f32 = 3.2;
+const CYCLOID_GROWTH_FLOOR_V: f32 = 0.8;
 const CYCLIC_MINR_MEASURE_V: f32 = 1.0;
-const CYCLOID_GROWTH_PERIOD_SEC: u32 = (AVG_HEAT_CYCLE_DURATION_SEC / 5) as u32 ;
+const CYCLOID_GROWTH_PERIOD_SEC: u32 = (AVG_HEAT_CYCLE_DURATION_SEC / 4) as u32 ;
 
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
 // const GROWTH_PHASE_PERIOD_SEC: f32 = 16.; // 0.062 Hz  -- 16 second cycle
@@ -151,7 +151,7 @@ static CYCLOID_VLUT: LazyLock<CycloidLut> = LazyLock::new(|| {
         CYCLOID_GROWTH_PERIOD_SEC, 
         CYCLOID_GROWTH_PEAK_V,
         CYCLOID_GROWTH_FLOOR_V,
-        1000)
+        200)
 });
 
 /// Update the given Exponential Weighted Moving Average with a new value
@@ -793,7 +793,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Recording data to {log_out_filename:?} ...");
 
     if ENABLE_CYCLIC_GROWTH {
-        println!("Cyclic mode: Peak {:.1} V, Floor {:.1} V, Period: {} sec, Max {:.1} mA, Meas {:.1} V, Term {:.1} Ω",
+        println!("Cyclic mode: Peak {:.2} V, Floor {:.2} V, Perd: {} sec, Max {:.1} mA, Meas {:.1} V, Term {:.1} Ω",
             CYCLOID_GROWTH_PEAK_V, CYCLOID_GROWTH_FLOOR_V , CYCLOID_GROWTH_PERIOD_SEC, MAX_CYCLIC_CURRENT_MA, CYCLIC_MINR_MEASURE_V, CYCLIC_TERMINATION_OHMS);
     }
     else if ENABLE_CONSTANT_VOLT_GROWTH {
