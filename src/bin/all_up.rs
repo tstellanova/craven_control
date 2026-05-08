@@ -78,7 +78,7 @@ const GAUGE_TERMINATION_OHMS: f32 = 4.5;
 const BRIDGED_TERMINATION_OHMS: f32 = 3.0;
 
 /// Below this resistance value we terminate the Cyclic phase
-const CYCLIC_TERMINATION_OHMS: f32 = 4.0;
+const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 5.0;
 
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666E2;
@@ -88,7 +88,7 @@ const MAX_CURRENT_SOURCE_MA: f32 = 1000.;
 /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 const OPEN_CIRCUIT_VOLTS: f32 = 10.; 
 
-const MAX_CYCLIC_CURRENT_MA:f32 =  0.75 * MAX_CURRENT_SOURCE_MA;
+const MAX_CYCLIC_CURRENT_MA:f32 =  0.55 * MAX_CURRENT_SOURCE_MA;
 
 /// The measured gap between requested and actual current supplied by the current source, when they diverge. 
 const PLATEAU_CURRENT_GAP_MA: f32 = 18.0;
@@ -116,16 +116,17 @@ const MEAN_CV_GAUGE_MV: f32 = 1.2 * 1000.;
 /// Mean voltage to strive for, with constant voltage mode in Growth phase
 const MEAN_CV_GROWTH_MV: f32 = 2.4 * 1000.;
 
-const CYCLOID_GROWTH_PEAK_V: f32 = 3.2;
-const CYCLOID_GROWTH_FLOOR_V: f32 = 0.8;
-const CYCLIC_MINR_MEASURE_V: f32 = 1.0;
+const CYCLIC_GROWTH_PEAK_V: f32 = 2.5;
+const CYCLIC_GROWTH_FLOOR_V: f32 = 0.8;
+const CYCLIC_LOWV_MINR_MEASURE_V: f32 = 1.0;
 const CYCLOID_GROWTH_PERIOD_SEC: u32 = (AVG_HEAT_CYCLE_DURATION_SEC / 4) as u32 ;
 
-// const GROWTH_PHASE_PERIOD_SEC: f32 = 20.; // 0.05 Hz  -- 20 second cycle
-// const GROWTH_PHASE_PERIOD_SEC: f32 = 16.; // 0.062 Hz  -- 16 second cycle
-// const GROWTH_PHASE_PERIOD_SEC: f32 = 15.; // 0.067 Hz  -- 15 second cycle
+const CYCLIC_HIGHV_DURATION_MS: u64 = 80*1000;
+const CYCLIC_LOWV_DURATION_MS: u64 = 20*1000;
+const CYCLIC_PERIOD_MS: u64 = CYCLIC_LOWV_DURATION_MS + CYCLIC_HIGHV_DURATION_MS;
+
+
 const GROWTH_PHASE_PERIOD_SEC: f32 = 12.; // 0.083 Hz  -- 12 second cycle
-// const GROWTH_PHASE_PERIOD_SEC: f32 = 10.; // 0.1 Hz  -- 10 second cycle
 
 /// Growth phase sweep frequency
 const GROWTH_PHASE_SWEEP_FREQUENCY: f32 = (1./GROWTH_PHASE_PERIOD_SEC); 
@@ -146,13 +147,13 @@ const REPORTED_CURRENT_THRESHOLD_MA: f32 = MIN_DRIVE_CURRENT_INCR_MA;
 const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
 
 /// Potential vs time LUT calculated once
-static CYCLOID_VLUT: LazyLock<CycloidLut> = LazyLock::new(|| {
-    CycloidLut::create_with(
-        CYCLOID_GROWTH_PERIOD_SEC, 
-        CYCLOID_GROWTH_PEAK_V,
-        CYCLOID_GROWTH_FLOOR_V,
-        200)
-});
+// static CYCLOID_VLUT: LazyLock<CycloidLut> = LazyLock::new(|| {
+//     CycloidLut::create_with(
+//         CYCLOID_GROWTH_PERIOD_SEC, 
+//         CYCLIC_GROWTH_PEAK_V,
+//         CYCLIC_GROWTH_FLOOR_V,
+//         200)
+// });
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -370,10 +371,16 @@ pub struct ElectrodeState {
     measured_ohms: f32,
     /// Exponential moving average of inter-electrode resistance
     ohms_ewma: f32,
-    /// Minimum of ohms EWMA
-    min_ohms_ewma: f32,
-    /// The last time the min_ohms_ewma changed
-    minr_update_ms: i64,
+
+    /// Minimum resistance measured during Low-voltage drive
+    lowv_minr_ohms: f32,
+    /// The last time lowv_minr changed
+    lowv_minr_update_ms: i64,
+    /// Minimum resistance measured during High-voltage drive
+    highv_minr_ohms: f32,
+    /// The last time highv_minr changed
+    highv_minr_update_ms: i64,
+
     /// Maximum value of inter-electrode resistance
     max_ohms_ewma: f32,
 
@@ -407,8 +414,10 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             phase_start_ms:0,
             measured_ohms:INF_INTER_ELECTRODE_OHMS,
             ohms_ewma:0.,
-            min_ohms_ewma: INF_INTER_ELECTRODE_OHMS,
-            minr_update_ms:0,
+            lowv_minr_ohms: INF_INTER_ELECTRODE_OHMS,
+            lowv_minr_update_ms:0,
+            highv_minr_ohms: INF_INTER_ELECTRODE_OHMS,
+            highv_minr_update_ms:0,
             max_ohms_ewma: 0.,
             target_drive_ma: MIN_DRIVE_CURRENT_INCR_MA,
             reported_drive_ma:0.,
@@ -491,7 +500,7 @@ fn trans_gauge_phase(state: &mut ElectrodeState, trans_start_ms: i64, trans_utc:
     state.phase_gauge_start_utc = trans_utc;
     println!("{} start Gauge phase w/ Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms) ",
         trans_utc,  
-        state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
+        state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms);
     state.max_ohms_ewma = state.ohms_ewma;
     GAUGE_MIN_CURRENT_MA
@@ -507,7 +516,7 @@ fn trans_growth_phase(state: &mut ElectrodeState, trans_start_ms: i64, trans_utc
     state.phase_growth_start_utc = trans_utc;
     println!("{} start Growth phase w/ Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms) ",
         trans_utc,
-        state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
+        state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms);
 }
 
@@ -521,7 +530,7 @@ fn trans_bridge_check(state: &mut ElectrodeState, trans_start_ms: i64, trans_utc
     state.phase_bridge_start_utc = trans_utc;
     println!("{} start Bridged phase w/ Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms) ",
         trans_utc, 
-        state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
+        state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms
     );
     state.max_ohms_ewma = state.ohms_ewma;
@@ -537,7 +546,7 @@ fn trans_cyclic_phase(state: &mut ElectrodeState, trans_utc: DateTime<chrono::Ut
     state.phase_cyclic_start_utc = trans_utc.timestamp();
     println!("{} start Cyclic phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
         state.phase_cyclic_start_utc, 
-        state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
+        state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms
     );
     CYCLIC_PHASE_FALLBACK_MA
@@ -552,7 +561,7 @@ fn trans_holding_phase(state: &mut ElectrodeState, trans_utc: DateTime<chrono::U
     state.phase_holding_start_utc = trans_utc.timestamp();
     println!("{} start Holding phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
         state.phase_holding_start_utc, 
-        state.ohms_ewma, state.min_ohms_ewma, state.max_ohms_ewma, 
+        state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms
     );
     HOLDING_PROBE_CURRENT_MA
@@ -594,15 +603,17 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
         match state.drive_phase {
             DrivePhase::Gauge | DrivePhase::Bridged =>  {
-                if state.ohms_ewma < state.min_ohms_ewma {
+                if state.ohms_ewma < state.lowv_minr_ohms {
                     println!("{} minR -> {:.3} ", end_drive_utc_dt.timestamp(), state.ohms_ewma);
-                    state.min_ohms_ewma = state.ohms_ewma;
-                    state.minr_update_ms = end_drive_ms;
+                    state.lowv_minr_ohms = state.ohms_ewma;
+                    state.lowv_minr_update_ms = end_drive_ms;
                 }
             }
             _ => {}
         }
     }
+
+    let ohms_ewma_valid = state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS;
 
     state.measured_ohms = measured_ohms;
     state.measured_volts = measured_volts;
@@ -614,12 +625,17 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             // while the melt is warming up, monitor the current throughput 
             new_drive_ma = WARMUP_CURRENT_MA;
             if phase_duration_ms > WARMUP_PHASE_DUR_MS && state.measured_ma > (new_drive_ma / 2.)  {
-                if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
-                    state.min_ohms_ewma = state.ohms_ewma;
+                // capture the resistance EWMA at this moment as both min and max
+                if ohms_ewma_valid {
+                    state.lowv_minr_ohms = state.ohms_ewma;
+                    state.highv_minr_ohms = state.ohms_ewma;
                 }
                 else { 
                     state.ohms_ewma = 100.;
-                    state.min_ohms_ewma = 100.; 
+                    state.lowv_minr_ohms = 100.; 
+                    state.lowv_minr_update_ms = end_drive_ms;
+                    state.highv_minr_ohms = 100.;
+                    state.highv_minr_update_ms = end_drive_ms;
                 }
 
                 if ENABLE_CYCLIC_GROWTH {
@@ -635,40 +651,43 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Cyclic => {
-            // TODO first, check for actual minR if volts == floor
-            let goal_drive_volts = CYCLOID_VLUT.voltage_at_ms(phase_duration_ms as i64) as f32;
+            // let goal_drive_volts = CYCLOID_VLUT.voltage_at_ms(phase_duration_ms as i64) as f32;
+            let goal_drive_volts = cyclic_voltage_at_time_ms(phase_duration_ms);
             // calculate current value for (nearly) constant voltage
-            if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
-                 // overdrive the current a little bit until we get near termination
-                let virtual_resistance_ohms  = state.ohms_ewma;
-                    // if state.ohms_ewma > CYCLIC_TERMINATION_OHMS { state.ohms_ewma - (CYCLIC_TERMINATION_OHMS-1.) }
-                    // else { state.ohms_ewma };
-                new_drive_ma = (goal_drive_volts * 1000.) / virtual_resistance_ohms;
+            if ohms_ewma_valid {
+                new_drive_ma = (goal_drive_volts * 1000.) / state.measured_ohms;
 
                 // cap at some reasonable limit
                 if new_drive_ma > MAX_CYCLIC_CURRENT_MA {
-                    println!("limiting current from {:.2} to {:.2} ", new_drive_ma, MAX_CYCLIC_CURRENT_MA);
+                    println!("Maxed {:.2} --> {:.2} mA", new_drive_ma, MAX_CYCLIC_CURRENT_MA);
                     new_drive_ma = MAX_CYCLIC_CURRENT_MA;
                 }
 
                 // check for cyclic growth termination condition
-                if state.measured_volts <= CYCLIC_MINR_MEASURE_V {
-                    if state.ohms_ewma < state.min_ohms_ewma {
-                        println!("{} {:.2} V, minR -> {:.3} ", 
+                if state.measured_volts <= CYCLIC_LOWV_MINR_MEASURE_V {
+                    if state.ohms_ewma < state.lowv_minr_ohms {
+                        println!("{} lowv {:.2} V,  minR -> {:.3} ", 
                             end_drive_utc_dt.timestamp(), state.measured_volts, state.ohms_ewma);
-                        state.min_ohms_ewma = state.ohms_ewma;
-                        state.minr_update_ms = end_drive_ms;
+                        state.lowv_minr_ohms = state.ohms_ewma;
+                        state.lowv_minr_update_ms = end_drive_ms;
                     }
 
-                    if state.ohms_ewma < CYCLIC_TERMINATION_OHMS {
+                    if state.ohms_ewma < CYCLIC_LOWV_TERMINATION_OHMS {
                         new_drive_ma =
                             trans_holding_phase(state, 
                                 end_drive_utc_dt,
                                 phase_duration_ms);
                     }
                 }
+                else {
+                    if state.ohms_ewma < state.highv_minr_ohms {
+                        println!("{} highv {:.2} V,  minR -> {:.3} ", 
+                            end_drive_utc_dt.timestamp(), state.measured_volts, state.ohms_ewma);
+                        state.highv_minr_ohms = state.ohms_ewma;
+                        state.highv_minr_update_ms = end_drive_ms;
+                    }
+                }
                 
-                // println!("drive : {:.2} V  versus {:.2} Ohms", goal_drive_volts, virtual_resistance_ohms);
             }
             else {
                 println!("{} cyclic fallback at {:.2}", end_drive_utc_dt.timestamp(), state.ohms_ewma);
@@ -679,13 +698,13 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             // Use a constant (medium) current value to measure minimum resistance
             new_drive_ma = GAUGE_MIN_CURRENT_MA;
         
-            if state.min_ohms_ewma < GAUGE_TERMINATION_OHMS {
+            if state.lowv_minr_ohms < GAUGE_TERMINATION_OHMS {
                 trans_bridge_check(state, 
                     end_drive_ms, end_drive_utc_dt.timestamp(), phase_duration_ms);
             }
             else if phase_duration_ms > GAUGE_RESISTANCE_PHASE_DUR_MS {
                 if state.ohms_ewma > 0. {
-                    state.min_ohms_ewma = state.ohms_ewma; //true low potential resistance
+                    state.lowv_minr_ohms = state.ohms_ewma; //true low potential resistance
                 }
                 trans_growth_phase(state, 
                     end_drive_ms, end_drive_utc_dt.timestamp(), phase_duration_ms);
@@ -694,7 +713,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Growth => {  
             // fixed-duration growth phase, not trying to verify minR at low potential/current
             if phase_duration_ms >= GROWTH_PHASE_DURATION_MS {
-                state.ohms_ewma = state.min_ohms_ewma; //reset to prior minimum
+                state.ohms_ewma = state.lowv_minr_ohms; //reset to prior minimum
                 new_drive_ma = trans_gauge_phase(state, end_drive_ms, end_drive_utc_dt.timestamp(), phase_duration_ms);
             }
             else {
@@ -702,7 +721,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
                 if ENABLE_CONSTANT_VOLT_GROWTH {
                     // calculate current value for (nearly) constant voltage
-                    if state.ohms_ewma > 0. && state.ohms_ewma < INF_INTER_ELECTRODE_OHMS {
+                    if ohms_ewma_valid {
                         // overdrive the current a little bit until we get near termination
                         let virtual_resistance_ohms  = 
                             if state.ohms_ewma  > GROWTH_TERMINAL_OHMS { state.ohms_ewma - 3. }
@@ -732,7 +751,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             else {
                 // verify the resistance at the check current
                 if state.ohms_ewma > BRIDGED_TERMINATION_OHMS {
-                    state.min_ohms_ewma = state.ohms_ewma; //true low potential resistance
+                    state.lowv_minr_ohms = state.ohms_ewma; //true low potential resistance
                     // restart growth sequence because measured resistance is higher than expected
                     trans_growth_phase(state, 
                     end_drive_ms, end_drive_utc_dt.timestamp(), phase_duration_ms);
@@ -773,6 +792,22 @@ fn growth_current_at_time_ms(timestamp_ms: i64, zero_ms: i64, mean_val: f32, var
     current
 }
 
+///
+/// Calculate the LowV/HighV voltage at a given time 
+fn cyclic_voltage_at_time_ms(phase_duration_ms: u64) -> f32 
+{
+    let remainder = phase_duration_ms % CYCLIC_PERIOD_MS;
+
+    if remainder < CYCLIC_LOWV_DURATION_MS {
+        // begin with LOWV drive on each cycle
+        CYCLIC_GROWTH_FLOOR_V
+    }
+    else {
+        // end with HIGHV drive on each cycle
+        CYCLIC_GROWTH_PEAK_V
+    }
+}
+
 /**
  * Entry point
  */
@@ -793,8 +828,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Recording data to {log_out_filename:?} ...");
 
     if ENABLE_CYCLIC_GROWTH {
-        println!("Cyclic mode: Peak {:.2} V, Floor {:.2} V, Perd: {} sec, Max {:.1} mA, Meas {:.1} V, Term {:.1} Ω",
-            CYCLOID_GROWTH_PEAK_V, CYCLOID_GROWTH_FLOOR_V , CYCLOID_GROWTH_PERIOD_SEC, MAX_CYCLIC_CURRENT_MA, CYCLIC_MINR_MEASURE_V, CYCLIC_TERMINATION_OHMS);
+        println!("Cyclic mode: Peak {:.2} V, Floor {:.2} V, Perd: {} ms, Max {:.1} mA, Meas {:.1} V, Term {:.1} Ω",
+            CYCLIC_GROWTH_PEAK_V, CYCLIC_GROWTH_FLOOR_V , CYCLIC_PERIOD_MS, MAX_CYCLIC_CURRENT_MA, CYCLIC_LOWV_MINR_MEASURE_V, CYCLIC_LOWV_TERMINATION_OHMS);
     }
     else if ENABLE_CONSTANT_VOLT_GROWTH {
        println!("Constant Voltage mode. Gauge {:.2} mV, Growth {:.2} mV,  ext_trig {:?}",
@@ -812,8 +847,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,MinRew";
-    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3}" } }
+    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,hvMinR,lvMinR";
+    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.3}" } }
     
     println!("{}",CSV_HEADER);
     writeln!(csv_writer, "{}", CSV_HEADER)?;
@@ -832,7 +867,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut electrode_state =  INITIAL_ELECTRODE_STATE;
 
     // precalculate lookup table of Voltage vs time for cycloid potential
-    LazyLock::force(&CYCLOID_VLUT);
+    // LazyLock::force(&CYCLOID_VLUT);
 
     electrode_state.phase_start_ms =  chrono::Utc::now().timestamp_millis();
 
@@ -879,7 +914,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             furnace_state.measured_temp_c,
             electrode_state.target_drive_ma, electrode_state.measured_ma,
             electrode_state.measured_volts, 
-            electrode_state.measured_ohms, electrode_state.ohms_ewma, electrode_state.min_ohms_ewma,
+            electrode_state.measured_ohms, electrode_state.ohms_ewma, 
+            electrode_state.highv_minr_ohms, electrode_state.lowv_minr_ohms,
         );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
