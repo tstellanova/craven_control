@@ -119,7 +119,6 @@ const MEAN_CV_GROWTH_MV: f32 = 2.4 * 1000.;
 const CYCLIC_GROWTH_PEAK_V: f32 = 2.5;
 const CYCLIC_GROWTH_FLOOR_V: f32 = 0.8;
 const CYCLIC_LOWV_MINR_MEASURE_V: f32 = 1.0;
-const CYCLOID_GROWTH_PERIOD_SEC: u32 = (AVG_HEAT_CYCLE_DURATION_SEC / 4) as u32 ;
 
 const CYCLIC_HIGHV_DURATION_MS: u64 = 80*1000;
 const CYCLIC_LOWV_DURATION_MS: u64 = 20*1000;
@@ -146,14 +145,6 @@ const REPORTED_CURRENT_THRESHOLD_MA: f32 = MIN_DRIVE_CURRENT_INCR_MA;
 /// Weighting alpha for calculating Exponential Weighted Moving Average of resistance
 const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
 
-/// Potential vs time LUT calculated once
-// static CYCLOID_VLUT: LazyLock<CycloidLut> = LazyLock::new(|| {
-//     CycloidLut::create_with(
-//         CYCLOID_GROWTH_PERIOD_SEC, 
-//         CYCLIC_GROWTH_PEAK_V,
-//         CYCLIC_GROWTH_FLOOR_V,
-//         200)
-// });
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -651,7 +642,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Cyclic => {
-            // let goal_drive_volts = CYCLOID_VLUT.voltage_at_ms(phase_duration_ms as i64) as f32;
             let goal_drive_volts = cyclic_voltage_at_time_ms(phase_duration_ms);
             // calculate current value for (nearly) constant voltage
             if ohms_ewma_valid {
@@ -865,9 +855,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut furnace_state = INITIAL_FURNACE_STATE;
     let mut electrode_state =  INITIAL_ELECTRODE_STATE;
-
-    // precalculate lookup table of Voltage vs time for cycloid potential
-    // LazyLock::force(&CYCLOID_VLUT);
 
     electrode_state.phase_start_ms =  chrono::Utc::now().timestamp_millis();
 
