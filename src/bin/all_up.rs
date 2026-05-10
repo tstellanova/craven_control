@@ -22,6 +22,9 @@ const MODBUS_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Pause in Modbus commands for "important" commands
 const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
+
+const MAINLOOP_DELAY: Duration = Duration::from_millis(100);
+
 /// minimum current stabilization time supported by the current source
 const CURRENT_SOURCE_STABILIZATION_MS: u64 = 25;
 /// time we allow the current to settle, after driving, before measuring
@@ -690,7 +693,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         writeln!(  csv_writer,"{}",  log_line)?;
         loop_count = (loop_count + 1) % 5;
         if loop_count == 0 { let _ = csv_writer.flush(); }
-        else { sleep(MODBUS_RW_DELAY).await; }
+        else { sleep(MAINLOOP_DELAY).await; }
 
     }
 
