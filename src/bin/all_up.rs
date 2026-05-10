@@ -18,7 +18,7 @@ use craven_control::*;
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
 
 /// Max time to wait for series of modbus transactions to complete
-const MODBUS_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(4);
+const MODBUS_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Pause in Modbus commands for "important" commands
 const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
@@ -74,7 +74,7 @@ const MAX_CYCLIC_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * IDEAL_CURRENT_DENSITY
 
 
 /// Highest voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
-const CYCLIC_GROWTH_PEAK_V: f32 = 2.4;
+const CYCLIC_GROWTH_PEAK_V: f32 = 2.3;
 /// Lowest voltage to use during Cycling phase, where true inter-electrode resistance can be measured. 
 const CYCLIC_GROWTH_FLOOR_V: f32 = 0.8;
 /// Voltage at which to measure "Low V" minimum resistance
@@ -99,7 +99,7 @@ const WARMUP_CURRENT_MA: f32 = 5.;
 const CYCLIC_PHASE_FALLBACK_MA: f32 = 55.;
 
 /// Weighting alpha for Exponential Weighted Moving Average of resistance
-const RESISTANCE_EWMA_ALPHA: f32 = 0.2;
+const RESISTANCE_EWMA_ALPHA: f32 = 0.4;
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
