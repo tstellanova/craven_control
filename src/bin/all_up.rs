@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use chrono::DateTime;
 use tokio::time::{sleep, sleep_until};
 use tokio_modbus::prelude::*;
 
@@ -290,8 +289,9 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
 #[derive(Debug, Clone)]
 pub struct ElectrodeState {
     drive_phase: DrivePhase,
+    /// UTC epoch milliseconds at which the state was last updated
     last_update_ms: i64,
-    /// Time at which this drive phase started
+    /// UTC epoch milliseconds at which this drive phase started
     phase_start_ms: i64,
     /// Measured inter-electrode resistance (or infinite)
     measured_ohms: f32,
@@ -321,11 +321,11 @@ pub struct ElectrodeState {
     /// Whether the external trigger circuit, controlling current source, is powered
     ext_trigger_powered: bool,
     /// Timestamp when Warmup phase started
-    phase_warmup_start_utc: i64,
+    phase_warmup_start_utc_ms: i64,
     /// Timestamp when Cyclic phase started
-    phase_cyclic_start_utc: i64,
+    phase_cyclic_start_utc_ms: i64,
     /// Timestamp when Holding phase started
-    phase_holding_start_utc: i64,
+    phase_holding_start_utc_ms: i64,
 }
 
 /// State the electrode controller is reset to when we're in "warmup" mode below the active melt temperature
@@ -346,9 +346,9 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             measured_ma:0.,
             measured_volts:0., 
             ext_trigger_powered: false,
-            phase_warmup_start_utc: 0,
-            phase_cyclic_start_utc: 0,
-            phase_holding_start_utc: 0,
+            phase_warmup_start_utc_ms: 0,
+            phase_cyclic_start_utc_ms: 0,
+            phase_holding_start_utc_ms: 0,
         }; 
 
 
@@ -408,15 +408,29 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
     return Ok((measured_volts, measured_milliamps, measured_ohms))
 }
 
+
+/// Transition to Warmup drive phase
+fn trans_warmup_phase(state: &mut ElectrodeState, trans_utc_ms: i64)
+-> f32
+{
+    state.drive_phase = DrivePhase::Warmup;
+    state.phase_start_ms = trans_utc_ms;
+    state.phase_warmup_start_utc_ms = trans_utc_ms;
+    println!("{} start Warmup phase", 
+        trans_utc_ms, 
+    );
+    WARMUP_CURRENT_MA
+}
+
 /// Transition to Cyclic drive phase
-fn trans_cyclic_phase(state: &mut ElectrodeState, trans_utc: DateTime<chrono::Utc>, prior_duration_ms: u64)
+fn trans_cyclic_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_duration_ms: u64)
 -> f32
 {
     state.drive_phase = DrivePhase::Cyclic;
-    state.phase_start_ms = trans_utc.timestamp_millis();
-    state.phase_cyclic_start_utc = trans_utc.timestamp();
+    state.phase_start_ms = trans_utc_ms;
+    state.phase_cyclic_start_utc_ms = state.phase_start_ms;
     println!("{} start Cyclic phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
-        state.phase_cyclic_start_utc, 
+        trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms
     );
@@ -424,14 +438,14 @@ fn trans_cyclic_phase(state: &mut ElectrodeState, trans_utc: DateTime<chrono::Ut
 }
 
 /// Switch to Holding drive phase
-fn trans_holding_phase(state: &mut ElectrodeState, trans_utc: DateTime<chrono::Utc>, prior_duration_ms: u64)
+fn trans_holding_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_duration_ms: u64)
 -> f32
 {
     state.drive_phase = DrivePhase::Holding;
-    state.phase_start_ms = trans_utc.timestamp_millis();
-    state.phase_holding_start_utc = trans_utc.timestamp();
+    state.phase_start_ms = trans_utc_ms;
+    state.phase_holding_start_utc_ms = state.phase_start_ms;
     println!("{} start Holding phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
-        state.phase_holding_start_utc, 
+        trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms
     );
@@ -451,10 +465,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         drive_current_and_measure(ctx, state, CURRENT_SOURCE_WAIT_TIME).await?;
 
     let after_drive_utc_dt = chrono::Utc::now();
-    let after_drive_ms = after_drive_utc_dt.timestamp_millis();
+    let after_drive_utc_ms = after_drive_utc_dt.timestamp_millis();
 
     let phase_duration_ms = 
-        if state.phase_start_ms <  after_drive_ms {  (after_drive_ms - state.phase_start_ms) as u64 } 
+        if state.phase_start_ms <  after_drive_utc_ms {  (after_drive_utc_ms - state.phase_start_ms) as u64 } 
         else { 0 };
 
     // reuse old drive current until instructed otherwise
@@ -464,7 +478,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let ohms_ewma_valid =
         if state.measured_ma != 0. && measured_ohms != INF_INTER_ELECTRODE_OHMS  {
             if measured_ohms == 0. {
-                println!("{} warn: 0 ohms resistance!", after_drive_utc_dt.timestamp());
+                println!("{} warn: 0 ohms resistance!", after_drive_utc_ms);
             }
             update_ewma(&mut state.ohms_ewma, measured_ohms, RESISTANCE_EWMA_ALPHA);
             if state.max_ohms_ewma < state.ohms_ewma {
@@ -478,12 +492,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     state.measured_volts = measured_volts;
     state.measured_ma = measured_milliamps;
 
-    // Then calculate any drive phase transitions
+
     match state.drive_phase {
         DrivePhase::Fresh => {
-            new_drive_ma = WARMUP_CURRENT_MA / 2.;
-            state.phase_warmup_start_utc = after_drive_utc_dt.timestamp();
-            state.drive_phase = DrivePhase::Warmup;
+            // just transition to next phase
+            new_drive_ma = trans_warmup_phase(state, after_drive_utc_ms);
         }
         DrivePhase::Warmup => {
             // while the melt is warming up, monitor the current throughput 
@@ -497,7 +510,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.highv_minr_ohms = state.ohms_ewma;
 
                 new_drive_ma = 
-                    trans_cyclic_phase(state, after_drive_utc_dt, phase_duration_ms);
+                    trans_cyclic_phase(state, after_drive_utc_ms, phase_duration_ms);
             }
             else {
                 println!("Warmup: {} sec {:.1} Ω", phase_duration_ms/1000, state.measured_ohms);
@@ -519,30 +532,30 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 if state.measured_volts <= CYCLIC_LOWV_MINR_MEASURE_V {
                     if state.ohms_ewma < state.lowv_minr_ohms {
                         println!("{} lowv {:.2} V,  LV_MinR -> {:.3} Ω", 
-                            after_drive_utc_dt.timestamp(), state.measured_volts, state.ohms_ewma);
+                            after_drive_utc_ms, state.measured_volts, state.ohms_ewma);
                         state.lowv_minr_ohms = state.ohms_ewma;
-                        state.lowv_minr_update_ms = after_drive_ms;
+                        state.lowv_minr_update_ms = after_drive_utc_ms;
                     }
 
                     if state.ohms_ewma < CYCLIC_LOWV_TERMINATION_OHMS {
                         new_drive_ma =
                             trans_holding_phase(state, 
-                                after_drive_utc_dt,
+                                after_drive_utc_ms,
                                 phase_duration_ms);
                     }
                 }
                 else {
                     if state.ohms_ewma < state.highv_minr_ohms {
                         println!("{} highv {:.2} V,  HV_MinR -> {:.3} Ω", 
-                            after_drive_utc_dt.timestamp(), state.measured_volts, state.ohms_ewma);
+                            after_drive_utc_ms, state.measured_volts, state.ohms_ewma);
                         state.highv_minr_ohms = state.ohms_ewma;
-                        state.highv_minr_update_ms = after_drive_ms;
+                        state.highv_minr_update_ms = after_drive_utc_ms;
                     }
                 }
                 
             }
             else {
-                println!("{} cyclic fallback at {:.2} Ω", after_drive_utc_dt.timestamp(), state.ohms_ewma);
+                println!("{} cyclic fallback at {:.2} Ω", after_drive_utc_ms, state.ohms_ewma);
                 new_drive_ma = CYCLIC_PHASE_FALLBACK_MA;
             }
         }
@@ -595,8 +608,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     zero_control_outputs(&mut ctx).await?;
 
-    let start_time = chrono::Utc::now().timestamp();
-    let log_out_filename = format!("{}_log.csv",start_time);
+    let start_time_secs = chrono::Utc::now().timestamp();
+    let log_out_filename = format!("{}_log.csv",start_time_secs);
     println!("Recording data to {log_out_filename:?} ...");
 
     println!("Cyclic mode: H {:.2} V, M {:.2}, L {:.2} V, Perd: {} ms, Imax {:.1} mA, Term {:.1} Ω",
@@ -607,7 +620,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_secs,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,hvMinR,lvMinR";
+    const CSV_HEADER: &str =  "epoch_ms,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,hvMinR,lvMinR";
     macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.3}" } }
     
     println!("{}",CSV_HEADER);
@@ -631,14 +644,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut loop_count = 0;
 
     // First run main loop at next second
-    let mut now_instant = tokio::time::Instant::now();
+    let now_instant = tokio::time::Instant::now();
     let first_loop_instant = now_instant + INTER_LOOP_DELAY - Duration::from_millis(now_instant.elapsed().subsec_millis() as u64);
     sleep_until(first_loop_instant).await;
 
+    // main control loop
     while running.load(Ordering::SeqCst) { 
-        now_instant = tokio::time::Instant::now();
         let current_utc_dt = chrono::Utc::now();
-        let next_run_instant = now_instant + INTER_LOOP_DELAY - Duration::from_millis(now_instant.elapsed().subsec_millis() as u64);
 
         let furnace_res = 
             tokio::time::timeout(MODBUS_TRANSACTION_TIMEOUT,control_furnace(&mut ctx, &mut furnace_state)).await;
@@ -666,7 +678,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let log_line = format!( CSV_LINE_FORMAT!(),
-            current_utc_dt.timestamp(),
+            current_utc_dt.timestamp_millis(),
             furnace_state.heater_on as u8,
             furnace_state.measured_temp_c,
             electrode_state.target_drive_ma, electrode_state.measured_ma,
@@ -676,11 +688,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         println!("{}",log_line);
         writeln!(  csv_writer,"{}",  log_line)?;
-        loop_count = (loop_count + 1) % 4;
+        loop_count = (loop_count + 1) % 5;
         if loop_count == 0 { let _ = csv_writer.flush(); }
+        else { sleep(MODBUS_RW_DELAY).await; }
 
-        // Attempt to sync to about 1 Hz measurements
-        sleep_until(next_run_instant).await;
     }
 
     println!("Flushing log file...");
@@ -696,14 +707,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ctx.disconnect().await?;
 
     // dump logged timeline
-    if electrode_state.phase_warmup_start_utc > 0 {
-        println!("{} Warmup started",electrode_state.phase_warmup_start_utc);
+    if electrode_state.phase_warmup_start_utc_ms > 0 {
+        println!("{} Warmup started",electrode_state.phase_warmup_start_utc_ms);
     }
-    if electrode_state.phase_cyclic_start_utc > 0 {
-        println!("{} Cyclic started",electrode_state.phase_cyclic_start_utc);
+    if electrode_state.phase_cyclic_start_utc_ms > 0 {
+        println!("{} Cyclic started",electrode_state.phase_cyclic_start_utc_ms);
     }
-    if electrode_state.phase_holding_start_utc > 0 {
-        println!("{} Holding started", electrode_state.phase_holding_start_utc);
+    if electrode_state.phase_holding_start_utc_ms > 0 {
+        println!("{} Holding started", electrode_state.phase_holding_start_utc_ms);
     }
 
     Ok(())
