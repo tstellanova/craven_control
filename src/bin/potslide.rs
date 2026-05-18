@@ -7,10 +7,13 @@ use tokio::time::{sleep, sleep_until};
 use tokio_modbus::prelude::*;
 
 use tokio_modbus::client::{Client};
+use tokio::io::{self, AsyncBufReadExt, BufReader};
+
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use ctrlc;
+use tokio::signal;
+
 use approx::{abs_diff_ne};
 use craven_control::*;
 
@@ -135,7 +138,7 @@ async fn read_electrode_current_drive(ctx: &mut tokio_modbus::client::Context) -
 /// 
 async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
 {
-    // measures dual type K thermocouple signal
+    // measures dual type K thermocouples
     ping_one_modbus_node_id(ctx, NODEID_YKKTC1202_DUAL_TK, REG_NODEID_YKKTC1202_DUAL_TK).await?;
 
     // measures voltage and current across the electrodes
@@ -504,20 +507,20 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Warmup => {
             // while the melt is warming up, monitor the current throughput 
             new_drive_ma = WARMUP_CURRENT_MA;
-            if phase_duration_ms > WARMUP_PHASE_DUR_MS 
-                && state.measured_ma > (new_drive_ma / 2.)  
-                && ohms_ewma_valid 
-            {
-                // capture the resistance EWMA at this moment as both min and max
-                state.lowv_minr_ohms = state.ohms_ewma;
-                state.highv_minr_ohms = state.ohms_ewma;
+            // if phase_duration_ms > WARMUP_PHASE_DUR_MS 
+            //     && state.measured_ma > (new_drive_ma / 2.)  
+            //     && ohms_ewma_valid 
+            // {
+            //     // capture the resistance EWMA at this moment as both min and max
+            //     state.lowv_minr_ohms = state.ohms_ewma;
+            //     state.highv_minr_ohms = state.ohms_ewma;
 
-                new_drive_ma = 
-                    trans_cyclic_phase(state, after_drive_utc_ms, phase_duration_ms);
-            }
-            else {
+            //     new_drive_ma = 
+            //         trans_cyclic_phase(state, after_drive_utc_ms, phase_duration_ms);
+            // }
+            // else {
                 println!("Warmup: {} sec {:.1} Ω", phase_duration_ms/1000, state.measured_ohms);
-            }
+            // }
         }
         DrivePhase::Cyclic => {
             let goal_drive_volts = cyclic_voltage_at_time_ms(phase_duration_ms);
@@ -629,16 +632,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}",CSV_HEADER);
     writeln!(csv_writer, "{}", CSV_HEADER)?;
 
+    // setup command handling
+    let stdin = io::stdin();
+    let mut lines = BufReader::new(stdin).lines();
+
+
     // Create an AtomicBool flag protected by Arc for thread-safe sharing
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
 
     // Set the Ctrl+C handler
-    ctrlc::set_handler(move || {
-        println!("\n====> Received Ctrl+C, initiating shutdown...");
-        r.store(false, Ordering::SeqCst);
-    }).expect("Error setting Ctrl-C handler");
+    // ctrlc::set_handler(
+    //     move || {
+    //     println!("\n====> Received Ctrl+C, initiating shutdown...");
+    //     r.store(false, Ordering::SeqCst);
+    // }).expect("Error setting Ctrl-C handler");
 
+    
     let mut furnace_state = INITIAL_FURNACE_STATE;
     let mut electrode_state =  INITIAL_ELECTRODE_STATE;
 
@@ -654,6 +664,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // main control loop
     while running.load(Ordering::SeqCst) { 
         let current_utc_dt = chrono::Utc::now();
+        let current_utc_ms = current_utc_dt.timestamp_millis();
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                println!("\nShutting down...");
+                // TODO eliminte need for 'running' flag?
+                 r.store(false, Ordering::SeqCst);
+                break;
+            }
+            cmd_line = lines.next_line() => {
+                match cmd_line {
+                    Ok(Some(cmd_line)) => {
+                        match cmd_line.trim() {
+                            "q" | "quit" => break,
+                            "hello" => println!("Hello!"),
+                            "warmup" => {
+                                trans_warmup_phase(&mut electrode_state, current_utc_ms);
+                            },
+                            "cyclic" => {
+                                trans_cyclic_phase(&mut electrode_state, current_utc_ms, 0);
+                            },
+                            "holding" => {
+                                trans_holding_phase(&mut electrode_state,  current_utc_ms, 0);
+                            }
+                            other => println!("Unknown commannd: {other:?}"),
+                        }
+                    }
+                    Ok(None) => break, // EOF (stdin closed)
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
+
 
         let furnace_res = 
             tokio::time::timeout(MODBUS_TRANSACTION_TIMEOUT,control_furnace(&mut ctx, &mut furnace_state)).await;
