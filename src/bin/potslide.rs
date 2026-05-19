@@ -515,9 +515,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 // new_drive_ma = 
                 //     trans_cyclic_phase(state, after_drive_utc_ms, phase_duration_ms);
             }
-            else {
-                println!("Warmup: {} sec {:.1} Ω", phase_duration_ms/1000, state.measured_ohms);
-            }
+            println!("Warmup: {} sec {:.1} Ω", phase_duration_ms/1000, state.measured_ohms);
         }
         DrivePhase::Cyclic => {
             let goal_drive_volts = cyclic_voltage_at_time_ms(phase_duration_ms);
