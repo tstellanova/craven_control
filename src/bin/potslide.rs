@@ -74,11 +74,11 @@ const MAX_CYCLIC_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * IDEAL_CURRENT_DENSITY
 
 
 /// Highest voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
-const CYCLIC_GROWTH_PEAK_V: f32 = 2.3;
+const CYCLIC_GROWTH_PEAK_V: f32 = 2.4;
 /// Lowest voltage to use during Cycling phase, where true inter-electrode resistance can be measured. 
-const CYCLIC_GROWTH_FLOOR_V: f32 = 0.8;
+const CYCLIC_GROWTH_FLOOR_V: f32 = 1.6;
 /// Voltage at which to measure "Low V" minimum resistance
-const CYCLIC_LOWV_MINR_MEASURE_V: f32 = 1.0;
+const CYCLIC_LOWV_MINR_MEASURE_V: f32 = 1.6;
 
 /// The duration of the High voltage growth segment of the Cyclic phase
 const CYCLIC_HIGHV_DURATION_MS: u64 = 80*1000;
@@ -96,7 +96,7 @@ const REPORTED_CURRENT_THRESHOLD_MA: f32 = MIN_DRIVE_CURRENT_INCR_MA;
 /// Fixed Warmup phase current
 const WARMUP_CURRENT_MA: f32 = 5.;
 /// Fall back to this current value during Cyclic drive phase when resistance is unknown.
-const CYCLIC_PHASE_FALLBACK_MA: f32 = 55.;
+const CYCLIC_PHASE_FALLBACK_MA: f32 = 100.;
 
 /// Weighting alpha for Exponential Weighted Moving Average of resistance
 const RESISTANCE_EWMA_ALPHA: f32 = 0.4;
@@ -556,8 +556,13 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 
             }
             else {
-                println!("{} cyclic fallback at {:.2} Ω", after_drive_utc_ms, state.ohms_ewma);
-                new_drive_ma = CYCLIC_PHASE_FALLBACK_MA;
+                if goal_drive_volts == CYCLIC_GROWTH_PEAK_V {
+                    new_drive_ma = CYCLIC_PHASE_FALLBACK_MA;
+                }
+                else {
+                    new_drive_ma = 25.;
+                }
+                println!("{} cyclic fallback at {:.2} Ω : {:.1}", after_drive_utc_ms, state.ohms_ewma,new_drive_ma);
             }
         }
         DrivePhase::Holding => {
@@ -666,13 +671,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 println!("Quitting...");
                                 break;
                             }
-                            "warmup" => {
+                            "w" | "warmup" => {
                                 trans_warmup_phase(&mut electrode_state, current_utc_ms);
                             },
-                            "cyclic" => {
+                            "c" | "cyclic" => {
                                 trans_cyclic_phase(&mut electrode_state, current_utc_ms, 0);
                             },
-                            "holding" => {
+                            "h" | "holding" => {
                                 trans_holding_phase(&mut electrode_state,  current_utc_ms, 0);
                             }
                             other => println!("Unknown commannd: {other:?}"),
