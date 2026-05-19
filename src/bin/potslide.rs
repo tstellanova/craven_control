@@ -647,9 +647,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ctrl_c_fut = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c_fut);
 
-    let next_line_fut = lines.next_line();
-    tokio::pin!(next_line_fut);
-
     // main control loop
     loop { 
         let current_utc_dt = chrono::Utc::now();
@@ -662,8 +659,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("\nCtrl-C: Shutting down...");
                 break;
             }
-            cmd_line = &mut next_line_fut => {
-            // cmd_line =  lines.next_line() => {
+            cmd_line =  lines.next_line() => {
                 match cmd_line {
                     Ok(Some(cmd_line)) => {
                         match cmd_line.trim() {
