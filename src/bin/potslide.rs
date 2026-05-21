@@ -48,9 +48,9 @@ const ELECTROLYTE_TARGET_TEMP_C:f32 = 777.;
 /// Below this temperature we don't drive start driving current through the electrodes.
 const MIN_ELECTRODE_CHECK_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C - 12.;
 /// The temperature at which the heater should cut in (turn on)
-const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 7.5;
+const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 5.;
 /// The temperature at which the heater should cut out (turn off)
-const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 12.5;
+const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 10.;
 /// Above this temperature the furnace heat is out of control
 const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + 22.5;
 
