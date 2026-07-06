@@ -21,7 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let builder = tokio_serial::new(tty_path, baud_rate);
     let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
 
-    ctx.set_slave(Slave(NODEID_DEFAULT));
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
     println!("waiting on set_slave..");
     sleep(Duration::from_millis(50)).await;
 
@@ -33,19 +33,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let read_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
     println!("> r2: {:?}", read_rsp);
 
-    // println!("r3 0x0029 ....");
-    // let read_rsp: Vec<u16> = ctx.read_holding_registers(0x0029, 1).await??;
-    // println!("> r3: {:?}", read_rsp);
 
 
-    // cofigure channel 1-8 input modes for WA8TAI_IV_AD: Even channels are current, odd channels are voltage
-    // configure_wa8tai_mixed_adc_modes(&mut ctx).await?;
+    // "Action process mode"
+    ctx.write_single_register(0x0000, 3).await??;
 
-    // for i in 0..10 {
-    //     sleep(Duration::from_millis(500)).await;
-    //     let _val = read_wa8tai_one_channel(&mut ctx, 4).await?;
-    //     // println!("test  value: {val:?}");
-    // }
+    // forward pulses
+    ctx.write_single_register(0x0001, 1600).await??;
+    // reverse pulses
+    ctx.write_single_register(0x0004, 1600).await??;
+    // number of cycles
+    ctx.write_single_register(0x0007, 3).await??;
+
+    // pulses per rotation?
+    ctx.write_single_register(0x0010, 1600).await??;
+
+
+    let config_resp: Vec<u16> = ctx.read_holding_registers(0x0000, 24).await??;
+    println!("> config 0x000 (24):\r\n {:?}", config_resp);
+
+
+    // serial mode
+    ctx.write_single_register(0x0030, 3).await??;
+
+    for _i in 0..5 {
+        let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+        println!("> status 0x1A: {:?}", status_resp);
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    // "Action process mode"
+    // ctx.write_single_register(0x0000, 0).await??;
+
     ctx.disconnect().await?;
 
     Ok(())
