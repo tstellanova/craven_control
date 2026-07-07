@@ -1,5 +1,6 @@
 #![allow(unused)]
 
+use std::os::macos::raw::stat;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -10,6 +11,54 @@ use tokio_serial::SerialStream;
 use craven_control::*;
 
 
+async fn start_motion(ctx: &mut tokio_modbus::client::Context, motion: u16) 
+-> Result<(), Box<dyn std::error::Error>> 
+
+{
+    println!("start motion: {}", motion);
+    ctx.write_single_register(0x0030, motion).await?;
+    sleep(Duration::from_millis(25)).await;
+    let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 5).await??;
+    println!("> start status 0x1A: {:?}", status_resp);
+    let opstatus = status_resp[0];
+    let direction = status_resp[1];
+    if opstatus == 0  {
+        println!("0x0030 -> {} start ", motion);
+        ctx.write_single_register(0x0030, 3).await?;
+    }
+
+    Ok(())
+}
+
+async fn start_forward(ctx: &mut tokio_modbus::client::Context) 
+-> Result<(), Box<dyn std::error::Error>> 
+
+{
+    stop_motion(ctx).await;
+    start_motion(ctx,0).await
+}
+
+async fn start_reverse(ctx: &mut tokio_modbus::client::Context) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    stop_motion(ctx).await;
+    start_motion(ctx,1).await
+}
+
+async fn stop_motion(ctx: &mut tokio_modbus::client::Context) 
+-> Result<(), Box<dyn std::error::Error>> 
+
+{
+    let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 5).await??;
+    println!("> stop status 0x1A: {:?}", status_resp);
+    let opstatus = status_resp[0];
+    let direction = status_resp[1];
+    if opstatus != 0 {
+        println!("0x0030 -> 3 stop_motion ");
+        ctx.write_single_register(0x0030, 3).await?;
+    }
+    Ok(())
+}
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,45 +74,110 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("waiting on set_slave..");
     sleep(Duration::from_millis(50)).await;
 
-    println!("r1 0x0000 ....");
-    let read_rsp: Vec<u16> = ctx.read_holding_registers(0x0000, 37).await??;
-    println!("> r1: {:?}", read_rsp);
+    // let config_resp: Vec<u16> = ctx.read_holding_registers(0x0000, 24).await??;
+    // println!("> config 0x000 (24):\r\n {:?}", config_resp);
 
-    println!("r2 0x001A ....");
     let read_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
-    println!("> r2: {:?}", read_rsp);
+    println!("> config 0x001A: {:?}", read_rsp);
 
 
+    // // "Action process mode"
+    ctx.write_single_register(0x0000, 6).await?;
 
-    // "Action process mode"
-    ctx.write_single_register(0x0000, 3).await??;
+    // // forward pulses
+    // ctx.write_single_register(0x0001, 1600).await??;
+    // // reverse pulses
+    // ctx.write_single_register(0x0004, 1600).await??;
+    // // number of cycles
+    // ctx.write_single_register(0x0007, 3).await??;
 
-    // forward pulses
-    ctx.write_single_register(0x0001, 1600).await??;
-    // reverse pulses
-    ctx.write_single_register(0x0004, 1600).await??;
-    // number of cycles
-    ctx.write_single_register(0x0007, 3).await??;
+    // // pulses per rotation?
+    // ctx.write_single_register(0x0010, 1600).await??;
 
-    // pulses per rotation?
-    ctx.write_single_register(0x0010, 1600).await??;
+    start_reverse(&mut ctx).await?;
+    sleep(Duration::from_millis(1100)).await;
+    start_forward(&mut ctx).await?;
+    sleep(Duration::from_millis(1000)).await;
+    
+    stop_motion(&mut ctx).await?;
+
+    // ctx.write_single_register(0x0030, 1).await??;
+    // sleep(Duration::from_millis(250)).await;
+    // let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+    // println!("> status 0x1A: {:?}", status_resp);
+    // let opstatus = status_resp[0];
+    // let direction = status_resp[1];
+    // if opstatus == 0 {
+    //     println!("0x0030 -> 1 start ");
+    //     ctx.write_single_register(0x0030, 1).await??;
+    // }
+
+    // sleep(Duration::from_millis(1000)).await;
+
+    
+    // println!("0x0030 -> 1 begin ");
+    // ctx.write_single_register(0x0030, 1).await??;
+    // sleep(Duration::from_millis(250)).await;
+
+    // let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+    // println!("> status 0x1A: {:?}", status_resp);
+    // let opstatus = status_resp[0];
+    // let direction = status_resp[1];
+    // if opstatus == 0 {
+    //     println!("0x0030 -> 3 start ");
+    //     ctx.write_single_register(0x0030, 3).await??;
+    // }
+    // sleep(Duration::from_millis(1000)).await;
 
 
-    let config_resp: Vec<u16> = ctx.read_holding_registers(0x0000, 24).await??;
-    println!("> config 0x000 (24):\r\n {:?}", config_resp);
+    // let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+    // println!("> status 0x1A: {:?}", status_resp);
+    // let opstatus = status_resp[0];
+    // let direction = status_resp[1];
+    // if opstatus != 0 {
+    //     println!("0x0030 -> 3 stopping ");
+    //     ctx.write_single_register(0x0030, 3).await??;
+    //     sleep(Duration::from_millis(1000)).await;
+    //     let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+    //     println!("> status 0x1A: {:?}", status_resp);
+    // }
+    // let new_direction = if direction == 0 { 1 } else { 0 };
+
+    // println!("0x0030 -> {} new ", new_direction);
+    // ctx.write_single_register(0x0030, new_direction).await??;
+    // sleep(Duration::from_millis(250)).await;
+    // let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+    // println!("> status 0x1A: {:?}", status_resp);
+    // let opstatus = status_resp[0];
+    // let direction = status_resp[1];
+    // if (opstatus == 0) {
+    //     println!("0x0030 -> 3 restart ");
+    //     ctx.write_single_register(0x0030, 3).await??;
+    // }
+    // sleep(Duration::from_millis(1000)).await;
+
+    // let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+    // println!("> status 0x1A: {:?}", status_resp);
+    // let opstatus = status_resp[0];
+    // let direction = status_resp[1];
+    // if opstatus != 0 {
+    //     println!("0x0030 -> 3 stopping ");
+    //     ctx.write_single_register(0x0030, 3).await??;
+    //     let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+    //     println!("> status 0x1A: {:?}", status_resp);
+    // }
 
 
-    // serial mode
-    ctx.write_single_register(0x0030, 3).await??;
+    // sleep(Duration::from_millis(1000)).await;
 
-    for _i in 0..5 {
-        let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
-        println!("> status 0x1A: {:?}", status_resp);
-        sleep(Duration::from_millis(500)).await;
-    }
-
-    // "Action process mode"
-    // ctx.write_single_register(0x0000, 0).await??;
+    // let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+    // println!("> status 0x1A: {:?}", status_resp);
+    // let opstatus = status_resp[0];
+    // let direction = status_resp[1];
+    // if opstatus != 0 {
+    //     println!("0x0030 -> 3 stop ");
+    //     ctx.write_single_register(0x0030, 3).await??;
+    // }
 
     ctx.disconnect().await?;
 
@@ -72,36 +186,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
 
-
-/**
- * Configure ADC with odd channels Voltage, even channels Amps
- */
-async fn configure_wa8tai_mixed_adc_modes(ctx: &mut tokio_modbus::client::Context)
--> Result<(), Box<dyn std::error::Error>>  {
-    let volt_mode_10v: u16 = 0x0000; // Range 0~10V, output range 0~5000 or 0~10000, unit mV;
-    let amp_mode_0020: u16 = 0x0002; // Range 4~20mA, output range 4000~20000, unit uA;
-    let amp_mode_0420: u16 = 0x0003; // Range 4~20mA, output range 4000~20000, unit uA;
-
-    // 0x0000: Range 0~5V, output range 0~5000 or 0~10000, unit mV;
-    // 0x0001: Range 1~5V, output range 1000~5000 or 2~10V, output range 2000~10000, unit mV;
-    // 0x0002: Range 0~20mA, output range 0~20000, unit uA;
-    // 0x0003: Range 4~20mA, output range 4000~20000, unit uA;
-    // 0x0004: Direct output of numerical code, output range 0~4096, requires linear conversion to obtain actual measured voltage and current;z
-    println!("select node: {NODEID_WA8TAI_IV_ADC:?}");
-    ctx.set_slave(Slave(NODEID_WA8TAI_IV_ADC)); 
-    ctx.write_single_register(0x1000, volt_mode_10v).await??;
-    ctx.write_single_register(0x1001, amp_mode_0020).await??;
-    ctx.write_single_register(0x1002, volt_mode_10v).await??;
-    ctx.write_single_register(0x1003, amp_mode_0020).await??;
-    
-    ctx.write_single_register(0x1004, volt_mode_10v).await??;
-    ctx.write_single_register(0x1005, amp_mode_0420).await??;
-    ctx.write_single_register(0x1006, volt_mode_10v).await??;
-    ctx.write_single_register(0x1007, amp_mode_0420).await??;
-
-    let resp = ctx.read_holding_registers(0x1000, 8).await??;
-    println!("wa8tai config response: {resp:?}");
-
-    Ok(())
-}
 
