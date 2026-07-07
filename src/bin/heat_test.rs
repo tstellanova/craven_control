@@ -185,8 +185,8 @@ async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
 {
     println!("Shutting down outputs...");
     toggle_furnace(ctx, false).await?;
-    toggle_ext_current_trigger(ctx, false).await?;
-    set_electrode_current_drive(ctx,0.).await?;
+    // toggle_ext_current_trigger(ctx, false).await?;
+    // set_electrode_current_drive(ctx,0.).await?;
     println!("Outputs disabled.");
     Ok(())
 }
@@ -642,6 +642,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let ctrl_c_fut = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c_fut);
+
+    println!("entering control loop...");
 
     // main control loop
     loop { 
