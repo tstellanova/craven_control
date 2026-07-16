@@ -134,18 +134,24 @@ async fn read_electrode_current_drive(ctx: &mut tokio_modbus::client::Context) -
 /// 
 async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
 {
-    // measures dual type K thermocouples
+    // measures dual type-K thermocouples
     ping_one_modbus_node_id(ctx, NODEID_YKKTC1202_DUAL_TK, REG_NODEID_YKKTC1202_DUAL_TK).await?;
 
     // measures voltage and current across the electrodes
-    // ping_one_modbus_node_id(ctx,NODEID_WA8TAI_IV_ADC, REG_NODEID_WAVESHARE_V2).await?;
     // TODO we can't ping WDCU3003M with a node ID read, because it doesn't expose node ID to Modbus
+    // ping_one_modbus_node_id(ctx, NODEID_WDCU3003_IV_ADC, 0x00).await?;
 
-    // supplies current to the electrode probe
+
+    ctx.set_slave(Slave(NODEID_WDCU3003_IV_ADC));
+    let wdc3003_vals: Vec<u16> = ctx.read_holding_registers(0, 10).await??;
+    print!("wdc3003_vals: {:?}", wdc3003_vals);
+
+    // supplies current to the cathode and anodes
     ping_one_modbus_node_id(ctx,NODEID_YKPVCCS010_CURR_SRC, REG_NODEID_YKPVCCS010_CURR_SRC).await?;
 
     // controls furnace on/off
-    ping_one_modbus_node_id(ctx, NODEID_R4DVI04_QRELAY_ADC, REG_NODEID_R4DVI04).await?;
+    // controls 4-pair anode connection relays
+    ping_one_modbus_node_id(ctx, NODEID_WAV_OCTO_RELAY, REG_NODEID_WAVESHARE_V2).await?;
 
     Ok(())
 }
@@ -169,22 +175,21 @@ enum DrivePhase {
 async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
 -> Result<(), Box<dyn std::error::Error>> 
 {
+    const FURNACE_RELAY_CHANNEL: u8 = 7;
     sleep(MODBUS_RW_DELAY).await;
-    toggle_r4dvi04_relay(ctx,4, active).await?;
-    Ok(())
+    toggle_wav_octo_relay(ctx, FURNACE_RELAY_CHANNEL, active).await
 }
-
  /// 
  /// Toggle the external current trigger circuit on and off
  /// 
-async fn toggle_ext_current_trigger(ctx: &mut tokio_modbus::client::Context, active:bool)
--> Result<(), Box<dyn std::error::Error>> 
-{
-    println!("toggle_ext_current_trigger: {:?}",active);
-    sleep(MODBUS_RW_DELAY).await;
-    toggle_r4dvi04_relay(ctx,1, active).await?;
-    Ok(())
-}
+// async fn toggle_ext_current_trigger(ctx: &mut tokio_modbus::client::Context, active:bool)
+// -> Result<(), Box<dyn std::error::Error>> 
+// {
+//     println!("toggle_ext_current_trigger: {:?}",active);
+//     sleep(MODBUS_RW_DELAY).await;
+//     toggle_r4dvi04_relay(ctx,1, active).await?;
+//     Ok(())
+// }
 
 /// Shut off the furnace heater, shut off any current drive.
 async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
@@ -192,8 +197,12 @@ async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
 {
     println!("Shutting down outputs...");
     toggle_furnace(ctx, false).await?;
-    toggle_ext_current_trigger(ctx, false).await?;
+    // toggle_ext_current_trigger(ctx, false).await?;
     set_electrode_current_drive(ctx,0.).await?;
+
+    let  anode_channels= [false; 4];
+    write_wav_octo_relays(ctx, &anode_channels).await?;
+
     println!("Outputs disabled.");
     Ok(())
 }
@@ -566,10 +575,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Holding => {
-            if state.ext_trigger_powered {
-                toggle_ext_current_trigger(ctx, false).await?;
-                state.ext_trigger_powered = false;
-            }
+            // if state.ext_trigger_powered {
+            //     toggle_ext_current_trigger(ctx, false).await?;
+            //     state.ext_trigger_powered = false;
+            // }
             new_drive_ma = HOLDING_PROBE_CURRENT_MA;
         }
     };

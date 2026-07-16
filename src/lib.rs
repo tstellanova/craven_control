@@ -372,3 +372,20 @@ pub async fn toggle_r4dvi04_relay(ctx: &mut tokio_modbus::client::Context, chann
     Ok(())
 }
 
+pub async fn toggle_wav_octo_relay(ctx: &mut tokio_modbus::client::Context, channel: u8, active: bool)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_WAV_OCTO_RELAY));
+    let relay_coil_address: u16 = (channel -1) as u16;
+    println!("set relay channel {}  (idx {}) to {}", channel, relay_coil_address, active);
+    ctx.write_single_coil(relay_coil_address, active).await??;
+    Ok(())
+}
+
+pub async fn write_wav_octo_relays(ctx: &mut tokio_modbus::client::Context, channel_vals: &[bool])
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_WAV_OCTO_RELAY));
+    ctx.write_multiple_coils(0x0000, &channel_vals).await??;
+    Ok(())
+}
