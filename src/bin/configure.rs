@@ -45,17 +45,9 @@ async fn set_one_modbus_node_id(tty_path: &str, baud_rate: u32,  reg_node_id: u1
  
     if existing_node_id != new_node_id {
         println!("writing new node ID {new_node_id:X?} to reg {reg_node_id:X?}");
-        if new_node_id != NODEID_QUAD_RELAY {
-            let w_resp = ctx.write_single_register(reg_node_id, new_node_id.into()).await?;
-            if w_resp.is_err() {
-                eprintln!("> w_resp: {:?}", w_resp);
-            }
-        } 
-        else {
-            let w_resp = ctx.write_multiple_registers(reg_node_id, &[new_node_id as u16]).await?;
-            if w_resp.is_err() {
-                eprintln!("> w_resp: {:?}", w_resp);
-            }
+        let w_resp = ctx.write_single_register(reg_node_id, new_node_id.into()).await?;
+        if w_resp.is_err() {
+            eprintln!("> w_resp: {:?}", w_resp);
         }
     }
 
@@ -108,11 +100,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Examples of setting the Modbus node ID for various devices -- need only be done once
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_YKDAQ1402_IV_ADC, NODEID_DEFAULT, NODEID_YKDAQ1402_IV_ADC).await?;
     
-    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_YKPVCCS010_CURR_SRC, NODEID_DEFAULT, NODEID_YKPVCCS010_CURR_SRC).await?;
+    set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WAV_OCTO_RELAY).await?;
+
+    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_YKPVCCS010_CURR_SRC, NODEID_DEFAULT, NODEID_YKPVCCS010_CURR_SRC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_TK, NODEID_DEFAULT, NODEID_DUAL_TK).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_PYRO_SIM, NODEID_DEFAULT, NODEID_PYRO_SIM).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4AIA04, 0x1E, NODEID_N4AIA04_IV_ADC).await?;
-    // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_QUAD_RELAY, 0x00, NODEID_QUAD_RELAY).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_QUAD_RELAY, 0x00, NODEID_QUAD_RELAY).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4VIA02, NODEID_DEFAULT, NODEID_N4VIA02_IV_ADC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_N4IOA01, NODEID_DEFAULT, NODEID_N4IOA01_CURR_GEN).await?;
@@ -120,20 +113,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_WAVESHARE_V2, NODEID_DEFAULT, NODEID_WA26419_8CH_DAC).await?;
     // set_one_modbus_node_id(tty_path, baud_rate, REG_NODEID_R4DVI04, NODEID_DEFAULT, NODEID_R4DVI04_QRELAY_ADC).await?;
 
-    //
 
-    // let builder = tokio_serial::new(tty_path, baud_rate);
-    // let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
+    let builder = tokio_serial::new(tty_path, baud_rate);
+    let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_WAV_OCTO_RELAY));
+    ping_one_modbus_node_id(&mut ctx, NODEID_WAV_OCTO_RELAY, REG_NODEID_WAVESHARE_V2).await?;
 
-    // cofigure channel 1-8 input modes for WA8TAI_IV_AD: Even channels are current, odd channels are voltage
-    // configure_wa8tai_mixed_adc_modes(&mut ctx).await?;
-
-    // let ma = read_wa8tai_iv(&mut ctx, 2).await?;
-    // println!("test milliamp value: {ma:?}");
-
-    // configure_wa26419(&mut ctx).await?;
-
-    // ctx.disconnect().await?;
+    ctx.disconnect().await?;
 
     Ok(())
 }

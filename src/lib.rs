@@ -32,7 +32,7 @@ pub const NODEID_YKKTC1202_DUAL_TK: u8 = 0x3F;
 pub const NODEID_N4IOA01_CURR_GEN: u8 = 0x4A; // 4-20 mA current loop source (signal generator)
 pub const NODEID_WA26419_8CH_DAC: u8 = 0x4F; // TODO Waveshare 8CH analog output (0-20 mA)
 pub const NODEID_R4DVI04_QRELAY_ADC: u8 = 0x5A; // Eletechsup quad relay plus ADC
-pub const NODEID_QUAD_RELAY: u8 = 0x5F; // TODO not yet programmed into relay board
+pub const NODEID_WAV_OCTO_RELAY: u8 = 0x5F; // Waveshare 8-relay board v3, SKU 17658
 pub const NODEID_SMC05_STEP_DRIVER: u8 = 0x6A; // SMC05 stepper motor controler
 pub const NODEID_MAX: u8 = 0x7F;
 

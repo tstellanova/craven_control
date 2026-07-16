@@ -36,7 +36,9 @@ async fn set_one_modbus_node_baud(tty_path: &str, node_id: u8, reg_baud_set: u16
 
     sleep(Duration::from_millis(500)).await;
     println!("Writing new val {reg_val} to reg {reg_baud_set:X?}");
-    let w_resp = ctx.write_single_register(reg_baud_set, reg_val.into()).await?;
+    let w_resp = 
+        tokio::time::timeout(Duration::from_secs(3),ctx.write_single_register(reg_baud_set, reg_val.into())).await;
+
     if w_resp.is_err() {
         eprintln!("> w_resp: {:?}", w_resp);
     }
@@ -109,12 +111,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Examples of changing the Modbus node baud rate for various devices 
     // set_one_modbus_node_baud(tty_path, NODEID_YKKTC1202_DUAL_TK, REG_YKKTC1202_BAUD, initial_baud_rate, final_baud_rate, 6).await?;
     // set_one_modbus_node_baud(tty_path, NODEID_WA8TAI_IV_ADC, REG_WA8TAI_BAUD, initial_baud_rate, final_baud_rate, 5).await?;
-    set_one_modbus_node_baud(tty_path, NODEID_YKPVCCS010_CURR_SRC, REG_YKPVCCS_BAUD, initial_baud_rate, final_baud_rate, 6).await?;
+    // set_one_modbus_node_baud(tty_path, NODEID_YKPVCCS010_CURR_SRC, REG_YKPVCCS_BAUD, initial_baud_rate, final_baud_rate, 6).await?;
     // set_one_modbus_node_baud(tty_path, NODEID_R4DVI04_QRELAY_ADC, REG_R4DVI04_BAUD, initial_baud_rate, final_baud_rate, 7).await?;
+    set_one_modbus_node_baud(tty_path, NODEID_WAV_OCTO_RELAY, 0x2000, initial_baud_rate, final_baud_rate, 0x0005).await?;
 
     let builder = tokio_serial::new(tty_path, final_baud_rate);
     let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(254));
-    enumerate_required_modules(&mut ctx).await?;
+    // enumerate_required_modules(&mut ctx).await?;
+    ping_one_modbus_node_id(&mut ctx, NODEID_WAV_OCTO_RELAY, REG_NODEID_WAVESHARE_V2);
 
     Ok(())
 }
