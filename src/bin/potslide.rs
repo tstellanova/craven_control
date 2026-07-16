@@ -329,8 +329,7 @@ pub struct ElectrodeState {
     measured_ma: f32,
     /// The actual measured potential across the electrodes 
     measured_volts: f32,
-    /// Whether the external trigger circuit, controlling current source, is powered
-    ext_trigger_powered: bool,
+
     /// Timestamp when Warmup phase started
     phase_warmup_start_utc_ms: i64,
     /// Timestamp when Cyclic phase started
@@ -356,7 +355,6 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             reported_drive_ma:0.,
             measured_ma:0.,
             measured_volts:0., 
-            ext_trigger_powered: false,
             phase_warmup_start_utc_ms: 0,
             phase_cyclic_start_utc_ms: 0,
             phase_holding_start_utc_ms: 0,
@@ -575,10 +573,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Holding => {
-            // if state.ext_trigger_powered {
-            //     toggle_ext_current_trigger(ctx, false).await?;
-            //     state.ext_trigger_powered = false;
-            // }
             new_drive_ma = HOLDING_PROBE_CURRENT_MA;
         }
     };
