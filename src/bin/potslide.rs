@@ -480,6 +480,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 ) 
 -> Result<(), Box<dyn std::error::Error>> 
 {    
+    // ensure that anode current outputs are set correctly
+    write_wav_octo_relays(ctx, &state.anode_connections).await?;
+
     // Drive output current pulse based on prior settings, and measure result
     let (measured_volts, measured_milliamps, measured_ohms) = 
         drive_current_and_measure(ctx, state, CURRENT_SOURCE_WAIT_TIME).await?;
@@ -511,11 +514,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     state.measured_ohms = measured_ohms;
     state.measured_volts = measured_volts;
     state.measured_ma = measured_milliamps;
-
-    anode_connections_at_time_ms(phase_duration_ms, &mut state.anode_connections);
+    state.anode_connections.fill(false);
     
     match state.drive_phase {
         DrivePhase::Fresh => {
+            state.phase_starts_utc_ms[DrivePhase::Fresh as usize] = state.phase_start_ms;
             // just transition to next phase
             new_drive_ma = trans_warmup_phase(state, after_drive_utc_ms);
         }
@@ -537,9 +540,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             println!("Warmup: {} sec {:.1} Ω", phase_duration_ms/1000, state.measured_ohms);
         }
         DrivePhase::Nucleation => {
+            anode_connections_at_time_ms(phase_duration_ms, &mut state.anode_connections);
             new_drive_ma = MAX_NUCLEATION_CURRENT_MA;
         }
         DrivePhase::Elongation => {
+            anode_connections_at_time_ms(phase_duration_ms, &mut state.anode_connections);
             let goal_drive_volts = cyclic_voltage_at_time_ms(phase_duration_ms);
             // calculate current value for (nearly) constant voltage
             if ohms_ewma_valid {
@@ -624,13 +629,15 @@ fn cyclic_voltage_at_time_ms(phase_duration_ms: u64) -> f32
 /// Calculate which anodes are connected (via relay switch) to the current supply at the given time
 fn anode_connections_at_time_ms(phase_duration_ms: u64, connections: &mut [bool]) 
 {
-    const CONNECTION_PERIOD_MS:usize = 1000;
+    // How long each anode should remain connected to the current source
+    const CONNECTION_PERIOD_MS:usize = 2000;
     let full_cycle_duration_ms  = connections.len() * CONNECTION_PERIOD_MS;
     // let cycle_count = phase_duration_ms / full_cycle_duration_ms;
     let cycle_modulo_ms = (phase_duration_ms as usize) % full_cycle_duration_ms;
     let active_idx = cycle_modulo_ms / CONNECTION_PERIOD_MS;
     connections.fill(false);
     connections[active_idx] = true;
+    // println!("{} anodes mods {} conns {:?}", phase_duration_ms, cycle_modulo_ms, connections);
 }
 
 /**
