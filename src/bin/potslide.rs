@@ -64,19 +64,27 @@ const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 5.0;
 // /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
 // const OPEN_CIRCUIT_VOLTS: f32 = 10.; 
 
-/// Ideal current density for growing desired carbon morphology (CNTs)
-const IDEAL_CURRENT_DENSITY_AMPS_CM2:f32 = 0.6;
-const IDEAL_CURRENT_DENSITY_MA_MM2:f32 = (IDEAL_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
+
 /// Pre-estimated surface area of electrode probe
-const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.)*20.; // 2 mm diameter, about 20 mm long
+const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.)*25.; // 1 mm diameter, about 25 mm long
+
+/// Ideal current density for establishing nucleation sites on the cathode surface
+const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.01;
+const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
+/// Maximum allowed current density during Nucleation phase
+const MAX_NUCLEATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
+
+/// Ideal current density for growing elongated CNTs from the nucleation sites
+const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4;
+const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Cyclic growth phase
-const MAX_CYCLIC_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * IDEAL_CURRENT_DENSITY_MA_MM2;
+const MAX_ELONGATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
 
 
 /// Highest voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
-const CYCLIC_GROWTH_PEAK_V: f32 = 2.4;
+const CYCLIC_GROWTH_PEAK_V: f32 = 2.2;
 /// Lowest voltage to use during Cycling phase, where true inter-electrode resistance can be measured. 
-const CYCLIC_GROWTH_FLOOR_V: f32 = 1.6;
+const CYCLIC_GROWTH_FLOOR_V: f32 = 1.4;
 /// Voltage at which to measure "Low V" minimum resistance
 const CYCLIC_LOWV_MINR_MEASURE_V: f32 = 1.6;
 
@@ -163,10 +171,14 @@ enum DrivePhase {
     Fresh = 0,
     /// Check that the electrode is immersed in conductive melt
     Warmup = 1, 
+    /// Establishing nucleation sites on the cathode
+    Nucleation = 2,
     /// Alternating measure/grow cycle
-    Cyclic = 2,
+    Elongation = 3,
     /// Monitor the inter-electrode conductivity
-    Holding = 3, 
+    Holding = 4, 
+    /// Number of drive phases
+    Max,
 } 
 
  /// 
@@ -179,17 +191,6 @@ async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
     sleep(MODBUS_RW_DELAY).await;
     toggle_wav_octo_relay(ctx, FURNACE_RELAY_CHANNEL, active).await
 }
- /// 
- /// Toggle the external current trigger circuit on and off
- /// 
-// async fn toggle_ext_current_trigger(ctx: &mut tokio_modbus::client::Context, active:bool)
-// -> Result<(), Box<dyn std::error::Error>> 
-// {
-//     println!("toggle_ext_current_trigger: {:?}",active);
-//     sleep(MODBUS_RW_DELAY).await;
-//     toggle_r4dvi04_relay(ctx,1, active).await?;
-//     Ok(())
-// }
 
 /// Shut off the furnace heater, shut off any current drive.
 async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
@@ -197,7 +198,6 @@ async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
 {
     println!("Shutting down outputs...");
     toggle_furnace(ctx, false).await?;
-    // toggle_ext_current_trigger(ctx, false).await?;
     set_electrode_current_drive(ctx,0.).await?;
 
     let  anode_channels= [false; 4];
@@ -330,12 +330,10 @@ pub struct ElectrodeState {
     /// The actual measured potential across the electrodes 
     measured_volts: f32,
 
-    /// Timestamp when Warmup phase started
-    phase_warmup_start_utc_ms: i64,
-    /// Timestamp when Cyclic phase started
-    phase_cyclic_start_utc_ms: i64,
-    /// Timestamp when Holding phase started
-    phase_holding_start_utc_ms: i64,
+    /// Timestamp when each phase started
+    phase_starts_utc_ms: [i64; DrivePhase::Max as usize],
+    /// Whether a given anode is connected to the current supply 
+    anode_connections: [bool; 4],
 }
 
 /// State the electrode controller is reset to when we're in "warmup" mode below the active melt temperature
@@ -355,9 +353,8 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             reported_drive_ma:0.,
             measured_ma:0.,
             measured_volts:0., 
-            phase_warmup_start_utc_ms: 0,
-            phase_cyclic_start_utc_ms: 0,
-            phase_holding_start_utc_ms: 0,
+            anode_connections: [false; 4],
+            phase_starts_utc_ms: [0; DrivePhase::Max as usize],
         }; 
 
 
@@ -417,28 +414,41 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
     return Ok((measured_volts, measured_milliamps, measured_ohms))
 }
 
-
 /// Transition to Warmup drive phase
 fn trans_warmup_phase(state: &mut ElectrodeState, trans_utc_ms: i64)
 -> f32
 {
     state.drive_phase = DrivePhase::Warmup;
     state.phase_start_ms = trans_utc_ms;
-    state.phase_warmup_start_utc_ms = trans_utc_ms;
+    state.phase_starts_utc_ms[DrivePhase::Warmup as usize] = trans_utc_ms;
     println!("{} start Warmup phase", 
         trans_utc_ms, 
     );
     WARMUP_CURRENT_MA
 }
 
-/// Transition to Cyclic drive phase
-fn trans_cyclic_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_duration_ms: u64)
+/// Transition to Nucleation drive phase
+fn trans_nucleation_phase(state: &mut ElectrodeState, trans_utc_ms: i64)
 -> f32
 {
-    state.drive_phase = DrivePhase::Cyclic;
+    state.drive_phase = DrivePhase::Nucleation;
     state.phase_start_ms = trans_utc_ms;
-    state.phase_cyclic_start_utc_ms = state.phase_start_ms;
-    println!("{} start Cyclic phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
+    state.phase_starts_utc_ms[DrivePhase::Nucleation as usize] = trans_utc_ms;
+    println!("{} start Nucleation phase w/Rewma {:.2} min {:.2} max {:.2} Ohms", 
+        trans_utc_ms, 
+        state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
+    );
+    MAX_NUCLEATION_CURRENT_MA
+}
+
+/// Transition to Elongation drive phase
+fn trans_elongation_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_duration_ms: u64)
+-> f32
+{
+    state.drive_phase = DrivePhase::Elongation;
+    state.phase_start_ms = trans_utc_ms;
+    state.phase_starts_utc_ms[DrivePhase::Elongation as usize] = trans_utc_ms;
+    println!("{} start Elongation phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
         trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms
@@ -452,7 +462,8 @@ fn trans_holding_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_dura
 {
     state.drive_phase = DrivePhase::Holding;
     state.phase_start_ms = trans_utc_ms;
-    state.phase_holding_start_utc_ms = state.phase_start_ms;
+    state.phase_starts_utc_ms[DrivePhase::Holding as usize] = trans_utc_ms;
+
     println!("{} start Holding phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
         trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
@@ -501,7 +512,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     state.measured_volts = measured_volts;
     state.measured_ma = measured_milliamps;
 
-
+    anode_connections_at_time_ms(phase_duration_ms, &mut state.anode_connections);
+    
     match state.drive_phase {
         DrivePhase::Fresh => {
             // just transition to next phase
@@ -520,20 +532,23 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
                 // TODO for now we require manually transition to next state
                 // new_drive_ma = 
-                //     trans_cyclic_phase(state, after_drive_utc_ms, phase_duration_ms);
+                //     trans_nucleation_phase(state, after_drive_utc_ms);
             }
             println!("Warmup: {} sec {:.1} Ω", phase_duration_ms/1000, state.measured_ohms);
         }
-        DrivePhase::Cyclic => {
+        DrivePhase::Nucleation => {
+            new_drive_ma = MAX_NUCLEATION_CURRENT_MA;
+        }
+        DrivePhase::Elongation => {
             let goal_drive_volts = cyclic_voltage_at_time_ms(phase_duration_ms);
             // calculate current value for (nearly) constant voltage
             if ohms_ewma_valid {
                 new_drive_ma = (goal_drive_volts * 1000.) / state.measured_ohms;
 
                 // cap at some reasonable limit
-                if new_drive_ma > MAX_CYCLIC_CURRENT_MA {
-                    println!("Maxed {:.2} --> {:.2} mA", new_drive_ma, MAX_CYCLIC_CURRENT_MA);
-                    new_drive_ma = MAX_CYCLIC_CURRENT_MA;
+                if new_drive_ma > MAX_ELONGATION_CURRENT_MA {
+                    println!("Maxed {:.2} --> {:.2} mA", new_drive_ma, MAX_ELONGATION_CURRENT_MA);
+                    new_drive_ma = MAX_ELONGATION_CURRENT_MA;
                 }
 
                 // check for cyclic growth termination condition
@@ -575,6 +590,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Holding => {
             new_drive_ma = HOLDING_PROBE_CURRENT_MA;
         }
+        DrivePhase::Max => {
+            unreachable!("DrivePhase::Max s/b unused");
+        }
     };
 
     // Now, update the drive current for the next main loop iteration
@@ -590,7 +608,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 /// Calculate the LowV/HighV voltage at a given time 
 fn cyclic_voltage_at_time_ms(phase_duration_ms: u64) -> f32 
 {
-    let remainder = phase_duration_ms % CYCLIC_PERIOD_MS;
+    let remainder: u64 = phase_duration_ms % CYCLIC_PERIOD_MS;
 
     if remainder < CYCLIC_LOWV_DURATION_MS {
         // begin with LOWV drive on each cycle
@@ -600,6 +618,19 @@ fn cyclic_voltage_at_time_ms(phase_duration_ms: u64) -> f32
         // end with HIGHV drive on each cycle
         CYCLIC_GROWTH_PEAK_V
     }
+}
+
+///
+/// Calculate which anodes are connected (via relay switch) to the current supply at the given time
+fn anode_connections_at_time_ms(phase_duration_ms: u64, connections: &mut [bool]) 
+{
+    const CONNECTION_PERIOD_MS:usize = 1000;
+    let full_cycle_duration_ms  = connections.len() * CONNECTION_PERIOD_MS;
+    // let cycle_count = phase_duration_ms / full_cycle_duration_ms;
+    let cycle_modulo_ms = (phase_duration_ms as usize) % full_cycle_duration_ms;
+    let active_idx = cycle_modulo_ms / CONNECTION_PERIOD_MS;
+    connections.fill(false);
+    connections[active_idx] = true;
 }
 
 /**
@@ -621,10 +652,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let log_out_filename = format!("{}_log.csv",start_time_secs);
     println!("Recording data to {log_out_filename:?} ...");
 
-    println!("Cyclic mode: H {:.2} V, M {:.2}, L {:.2} V, Perd: {} ms, Imax {:.1} mA, Term {:.1} Ω",
-        CYCLIC_GROWTH_PEAK_V, CYCLIC_LOWV_MINR_MEASURE_V, CYCLIC_GROWTH_FLOOR_V , 
-        CYCLIC_PERIOD_MS, 
-        MAX_CYCLIC_CURRENT_MA, CYCLIC_LOWV_TERMINATION_OHMS);
+    println!("Nucleate: Imax {:.2} mA", MAX_NUCLEATION_CURRENT_MA);
+    println!("Elongate: Imax {:.2} mA Term {:.1} Ω ", MAX_ELONGATION_CURRENT_MA, CYCLIC_LOWV_TERMINATION_OHMS);
+
 
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
@@ -677,8 +707,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "w" | "warmup" => {
                                 trans_warmup_phase(&mut electrode_state, current_utc_ms);
                             },
-                            "c" | "cyclic" => {
-                                trans_cyclic_phase(&mut electrode_state, current_utc_ms, 0);
+                            "n" | "nucleate" => {
+                                trans_nucleation_phase(&mut electrode_state, current_utc_ms);
+                            }
+                            "e" | "elongate" => {
+                                trans_elongation_phase(&mut electrode_state, current_utc_ms, 0);
                             },
                             "h" | "holding" => {
                                 trans_holding_phase(&mut electrode_state,  current_utc_ms, 0);
@@ -764,15 +797,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // dump logged timeline
-    if electrode_state.phase_warmup_start_utc_ms > 0 {
-        println!("{} Warmup started",electrode_state.phase_warmup_start_utc_ms);
-    }
-    if electrode_state.phase_cyclic_start_utc_ms > 0 {
-        println!("{} Cyclic started",electrode_state.phase_cyclic_start_utc_ms);
-    }
-    if electrode_state.phase_holding_start_utc_ms > 0 {
-        println!("{} Holding started", electrode_state.phase_holding_start_utc_ms);
-    }
+    println!("phase_starts_ms: {:?}", electrode_state.phase_starts_utc_ms);
 
     println!("finished...");
     std::process::exit(0); 
