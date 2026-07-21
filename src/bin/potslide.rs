@@ -48,9 +48,9 @@ const ELECTROLYTE_TARGET_TEMP_C:f32 = 777.;
 /// Below this temperature we don't drive start driving current through the electrodes.
 const MIN_ELECTRODE_CHECK_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C - 12.;
 /// The temperature at which the heater should cut in (turn on)
-const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 5.;
+const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 2.;
 /// The temperature at which the heater should cut out (turn off)
-const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 10.;
+const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 15.;
 /// Above this temperature the furnace heat is out of control
 const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + 22.5;
 
@@ -68,6 +68,10 @@ const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 5.0;
 /// Pre-estimated surface area of electrode probe
 const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.)*25.; // 1 mm diameter, about 25 mm long
 
+const WARMUP_CURRENT_DENSITY_AMPS_CM2:f32 = 0.001;
+const WARMUP_CURRENT_DENSITY_MA_MM2:f32 = (WARMUP_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
+const MAX_WARMUP_CURRENT_MA:f32 = (ELECTRODE_SURFACE_MM2 * WARMUP_CURRENT_DENSITY_MA_MM2).ceil();
+
 /// Ideal current density for establishing nucleation sites on the cathode surface
 const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.01;
 const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
@@ -75,11 +79,11 @@ const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_C
 const MAX_NUCLEATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4;
+const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.25;
 const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
-
+const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 
 /// Highest voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
 const CYCLIC_GROWTH_PEAK_V: f32 = 2.2;
@@ -102,9 +106,9 @@ const HOLDING_PROBE_CURRENT_MA: f32 = 2. * MIN_DRIVE_CURRENT_INCR_MA;
 /// We only recognize current values reported by the current source above this threshold
 const REPORTED_CURRENT_THRESHOLD_MA: f32 = MIN_DRIVE_CURRENT_INCR_MA;
 /// Fixed Warmup phase current
-const WARMUP_CURRENT_MA: f32 = 5.;
-/// Fall back to this current value during Cyclic drive phase when resistance is unknown.
-const CYCLIC_PHASE_FALLBACK_MA: f32 = 100.;
+const WARMUP_CURRENT_MA: f32 =  MAX_WARMUP_CURRENT_MA;
+/// Fall back to this current value during Elongation drive phase when resistance is unknown.
+const ELONGATION_PHASE_FALLBACK_MA: f32 = MID_ELONGATION_CURRENT_MA;
 
 /// Weighting alpha for Exponential Weighted Moving Average of resistance
 const RESISTANCE_EWMA_ALPHA: f32 = 0.4;
@@ -453,7 +457,7 @@ fn trans_elongation_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_d
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms
     );
-    CYCLIC_PHASE_FALLBACK_MA
+    ELONGATION_PHASE_FALLBACK_MA
 }
 
 /// Switch to Holding drive phase
@@ -584,12 +588,12 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
             else {
                 if goal_drive_volts == CYCLIC_GROWTH_PEAK_V {
-                    new_drive_ma = CYCLIC_PHASE_FALLBACK_MA;
+                    new_drive_ma = ELONGATION_PHASE_FALLBACK_MA;
                 }
                 else {
                     new_drive_ma = 25.;
                 }
-                println!("{} cyclic fallback at {:.2} Ω : {:.1}", after_drive_utc_ms, state.ohms_ewma,new_drive_ma);
+                println!("{} Elongation fallback at {:.2} Ω : {:.1}", after_drive_utc_ms, state.ohms_ewma,new_drive_ma);
             }
         }
         DrivePhase::Holding => {
