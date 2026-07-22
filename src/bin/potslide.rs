@@ -79,14 +79,14 @@ const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_C
 const MAX_NUCLEATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.25;
+const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.375;
 const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
 const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 
 /// Highest voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
-const CYCLIC_GROWTH_PEAK_V: f32 = 2.0;
+const CYCLIC_GROWTH_PEAK_V: f32 = 2.4;
 /// Lowest voltage to use during Cycling phase, where true inter-electrode resistance can be measured. 
 const CYCLIC_GROWTH_FLOOR_V: f32 = 1.4;
 /// Voltage at which to measure "Low V" minimum resistance
@@ -664,7 +664,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Recording data to {log_out_filename:?} ...");
 
     println!("Nucleate: Imax {:.2} mA", MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: Imax {:.2} mA Term {:.1} Ω ", MAX_ELONGATION_CURRENT_MA, CYCLIC_LOWV_TERMINATION_OHMS);
+    println!("Elongate: Imax {:.2} mA PeakV: {:.1} Term {:.1} Ω ", MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,  CYCLIC_LOWV_TERMINATION_OHMS);
 
 
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
