@@ -377,7 +377,7 @@ pub async fn toggle_wav_octo_relay(ctx: &mut tokio_modbus::client::Context, chan
 {
     ctx.set_slave(Slave(NODEID_WAV_OCTO_RELAY));
     let relay_coil_address: u16 = (channel -1) as u16;
-    println!("set relay channel {}  (idx {}) to {}", channel, relay_coil_address, active);
+    // println!("set relay channel {}  (idx {}) to {}", channel, relay_coil_address, active);
     ctx.write_single_coil(relay_coil_address, active).await??;
     Ok(())
 }
