@@ -48,7 +48,7 @@ const ELECTROLYTE_TARGET_TEMP_C:f32 = 777.;
 /// Below this temperature we don't drive start driving current through the electrodes.
 const MIN_ELECTRODE_CHECK_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C - 12.;
 /// The temperature at which the heater should cut in (turn on)
-const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 2.;
+const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 5.;
 /// The temperature at which the heater should cut out (turn off)
 const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 15.;
 /// Above this temperature the furnace heat is out of control
@@ -57,23 +57,17 @@ const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + 22.5;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666.;
 /// Below this resistance value we terminate the Cyclic phase
-const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 5.0;
+const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 3.0;
 
-// /// Maximum current the current source can provide
-// const MAX_CURRENT_SOURCE_MA: f32 = 1000.;
-// /// Highest potential provided by current source (measured as 10.689) minus some uncertainty
-// const OPEN_CIRCUIT_VOLTS: f32 = 10.; 
-
-
-/// Pre-estimated surface area of electrode probe
-const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.)*25.; // 1 mm diameter, about 25 mm long
+/// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
+const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.)*30.; // 1 mm diameter, about 30 mm long
 
 const WARMUP_CURRENT_DENSITY_AMPS_CM2:f32 = 0.001;
 const WARMUP_CURRENT_DENSITY_MA_MM2:f32 = (WARMUP_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 const MAX_WARMUP_CURRENT_MA:f32 = (ELECTRODE_SURFACE_MM2 * WARMUP_CURRENT_DENSITY_MA_MM2).ceil();
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
-const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.01;
+const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.02;
 const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Nucleation phase
 const MAX_NUCLEATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
@@ -536,15 +530,11 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 // capture the resistance EWMA at this moment as both min and max
                 state.lowv_minr_ohms = state.ohms_ewma;
                 state.highv_minr_ohms = state.ohms_ewma;
-
-                // TODO for now we require manually transition to next state
-                // new_drive_ma = 
-                //     trans_nucleation_phase(state, after_drive_utc_ms);
             }
             println!("Warmup: {} sec {:.1} Ω", phase_duration_ms/1000, state.measured_ohms);
         }
         DrivePhase::Nucleation => {
-            anode_connections_at_time_ms(phase_duration_ms, &mut state.anode_connections);
+            set_all_anode_connections(&mut state.anode_connections, true);
             new_drive_ma = MAX_NUCLEATION_CURRENT_MA;
         }
         DrivePhase::Elongation => {
@@ -627,6 +617,13 @@ fn cyclic_voltage_at_time_ms(phase_duration_ms: u64) -> f32
         // end with HIGHV drive on each cycle
         CYCLIC_GROWTH_PEAK_V
     }
+}
+
+///
+/// Set all anode connections as either active (relay Normally Open lead) or inactive (relay Normally Closed lead)
+fn set_all_anode_connections(connections: &mut [bool], active: bool)
+{
+    connections.fill(active);
 }
 
 ///
