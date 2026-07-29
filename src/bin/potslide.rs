@@ -67,13 +67,13 @@ const WARMUP_CURRENT_DENSITY_MA_MM2:f32 = (WARMUP_CURRENT_DENSITY_AMPS_CM2 * 100
 const MAX_WARMUP_CURRENT_MA:f32 = (ELECTRODE_SURFACE_MM2 * WARMUP_CURRENT_DENSITY_MA_MM2).ceil();
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
-const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.04;
+const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.025;
 const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Nucleation phase
 const MAX_NUCLEATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4;
+const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.15; // For C28000 cathode, long straight CNTs
 const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
@@ -724,7 +724,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "h" | "holding" => {
                                 trans_holding_phase(&mut electrode_state,  current_utc_ms, 0);
                             }
-                            other => println!("Unknown command: {other:?}"),
+                            other => println!("Unknown commafilend: {other:?}"),
                         }
                     }
                     Ok(None) => {
