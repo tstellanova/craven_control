@@ -60,7 +60,8 @@ const INF_INTER_ELECTRODE_OHMS: f32 = 666.;
 const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 3.0;
 
 /// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
-const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.)*30.; // 1 mm diameter, about 30 mm long
+// const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.)*30.; // 1 mm diameter, about 30 mm long
+const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.5)*25.; // 1.5 mm diameter, about 25 mm long
 
 const WARMUP_CURRENT_DENSITY_AMPS_CM2:f32 = 0.001;
 const WARMUP_CURRENT_DENSITY_MA_MM2:f32 = (WARMUP_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
@@ -73,7 +74,7 @@ const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_C
 const MAX_NUCLEATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.15; // For C28000 cathode, long straight CNTs
+const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.3; // For C28000 cathode, long straight CNTs
 const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
@@ -724,7 +725,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "h" | "holding" => {
                                 trans_holding_phase(&mut electrode_state,  current_utc_ms, 0);
                             }
-                            other => println!("Unknown commafilend: {other:?}"),
+                            other => println!("Unknown command: {other:?}"),
                         }
                     }
                     Ok(None) => {
