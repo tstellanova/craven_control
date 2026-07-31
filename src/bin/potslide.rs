@@ -37,6 +37,9 @@ const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(CURRENT_SOURCE_
 /// Minimum time for Warmup phase
 const WARMUP_PHASE_DUR_MS: u64 = 30*1000; 
 
+/// Minimum time for automated Nucleation phase
+const NUCLEATION_DURATION_MS: u64 = 15*60*1000;
+
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
 /// Temp at which we attempt to submerge thermo probes in electrolyte melt
@@ -67,13 +70,13 @@ const WARMUP_CURRENT_DENSITY_MA_MM2:f32 = (WARMUP_CURRENT_DENSITY_AMPS_CM2 * 100
 const MAX_WARMUP_CURRENT_MA:f32 = (ELECTRODE_SURFACE_MM2 * WARMUP_CURRENT_DENSITY_MA_MM2).ceil();
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
-const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.04;
+const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.02;
 const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Nucleation phase
 const MAX_NUCLEATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4;
+const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.15; //reduced to attempt straight CNT growth
 const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
@@ -536,6 +539,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Nucleation => {
             set_all_anode_connections(&mut state.anode_connections, true);
             new_drive_ma = MAX_NUCLEATION_CURRENT_MA;
+
+            if phase_duration_ms > NUCLEATION_DURATION_MS  {
+                trans_elongation_phase(state, after_drive_utc_ms, phase_duration_ms);
+            } 
         }
         DrivePhase::Elongation => {
             anode_connections_at_time_ms(phase_duration_ms, &mut state.anode_connections);
