@@ -38,7 +38,7 @@ const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(CURRENT_SOURCE_
 const WARMUP_PHASE_DUR_MS: u64 = 30*1000; 
 
 /// Minimum time for automated Nucleation phase
-const NUCLEATION_DURATION_MS: u64 = 15*60*1000;
+const NUCLEATION_DURATION_MS: u64 = 3*60*1000;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -51,9 +51,9 @@ const ELECTROLYTE_TARGET_TEMP_C:f32 = 777.;
 /// Below this temperature we don't drive start driving current through the electrodes.
 const MIN_ELECTRODE_CHECK_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C - 12.;
 /// The temperature at which the heater should cut in (turn on)
-const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 5.;
+const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 2.;
 /// The temperature at which the heater should cut out (turn off)
-const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 15.;
+const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 10.;
 /// Above this temperature the furnace heat is out of control
 const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + 22.5;
 
@@ -63,20 +63,20 @@ const INF_INTER_ELECTRODE_OHMS: f32 = 666.;
 const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 3.0;
 
 /// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
-const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.)*30.; // 1 mm diameter, about 30 mm long
+const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*30.; // Twisted pair of 1 mm diameter, about 30 mm long
 
 const WARMUP_CURRENT_DENSITY_AMPS_CM2:f32 = 0.001;
 const WARMUP_CURRENT_DENSITY_MA_MM2:f32 = (WARMUP_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 const MAX_WARMUP_CURRENT_MA:f32 = (ELECTRODE_SURFACE_MM2 * WARMUP_CURRENT_DENSITY_MA_MM2).ceil();
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
-const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.02;
+const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.05;
 const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Nucleation phase
 const MAX_NUCLEATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.15; //reduced to attempt straight CNT growth
+const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.40; //reduced to attempt straight CNT growth
 const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
@@ -85,14 +85,14 @@ const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 /// Highest voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
 const CYCLIC_GROWTH_PEAK_V: f32 = 2.4;
 /// Lowest voltage to use during Cycling phase, where true inter-electrode resistance can be measured. 
-const CYCLIC_GROWTH_FLOOR_V: f32 = 1.4;
+const CYCLIC_GROWTH_FLOOR_V: f32 = 1.3;
 /// Voltage at which to measure "Low V" minimum resistance
-const CYCLIC_LOWV_MINR_MEASURE_V: f32 = 1.6;
+const CYCLIC_LOWV_MINR_MEASURE_V: f32 = 1.4;
 
 /// The duration of the High voltage growth segment of the Cyclic phase
-const CYCLIC_HIGHV_DURATION_MS: u64 = 80*1000;
+const CYCLIC_HIGHV_DURATION_MS: u64 = 210*1000;
 /// The duration of the Low voltage measurement segment of the Cyclic phase
-const CYCLIC_LOWV_DURATION_MS: u64 = 20*1000;
+const CYCLIC_LOWV_DURATION_MS: u64 = 30*1000;
 /// Total duration of the combined high/low Cyclic phase drive cycle
 const CYCLIC_PERIOD_MS: u64 = CYCLIC_LOWV_DURATION_MS + CYCLIC_HIGHV_DURATION_MS;
 
@@ -667,8 +667,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let log_out_filename = format!("{}_log.csv",start_time_secs);
     println!("Recording data to {log_out_filename:?} ...");
 
-    println!("Nucleate: Imax {:.2} mA", MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: Imax {:.2} mA PeakV: {:.1} Term {:.1} Ω ", MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,  CYCLIC_LOWV_TERMINATION_OHMS);
+    println!("Furnace cut-in {:.1} °C cut-out {:.1} °C excessive  {:.1} °C", 
+        CUT_IN_ABOVE_TARGET_TEMP_C, CUT_OUT_ABOVE_TARGET_TEMP_C, EXCESSIVE_HEAT_TEMP_C);
+    println!("Nucleate {} ms , {:.2} mA", NUCLEATION_DURATION_MS, MAX_NUCLEATION_CURRENT_MA);
+    println!("Elongate: Imax {:.2} mA Vmax: {:.1} Term {:.1} Ω ", 
+        MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,  CYCLIC_LOWV_TERMINATION_OHMS);
 
 
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
