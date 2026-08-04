@@ -47,7 +47,7 @@ const PROBE_CHECK_TEMP_C:f32 = 550.;
 /// Temp we expect to see when probe is succesfully inserted into melt
 const PROBE_INSERTED_TEMP_C:f32 = 600.;
 /// The center temperature we are trying to achieve for the electrolyte melt
-const ELECTROLYTE_TARGET_TEMP_C:f32 = 777.;
+const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 /// Below this temperature we don't drive start driving current through the electrodes.
 const MIN_ELECTRODE_CHECK_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C - 12.;
 /// The temperature at which the heater should cut in (turn on)
@@ -60,7 +60,7 @@ const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + 22.5;
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666.;
 /// Below this resistance value we terminate the Cyclic phase
-const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 3.0;
+const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 1.0;
 
 /// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
 const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*30.; // Twisted pair of 1 mm diameter, about 30 mm long
@@ -667,8 +667,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let log_out_filename = format!("{}_log.csv",start_time_secs);
     println!("Recording data to {log_out_filename:?} ...");
 
-    println!("Furnace cut-in {:.1} °C cut-out {:.1} °C excessive  {:.1} °C", 
-        CUT_IN_ABOVE_TARGET_TEMP_C, CUT_OUT_ABOVE_TARGET_TEMP_C, EXCESSIVE_HEAT_TEMP_C);
+    println!("Furnace target {:.1} °C  cut-in {:.1} °C cut-out {:.1} °C excessive  {:.1} °C", 
+       ELECTROLYTE_TARGET_TEMP_C, CUT_IN_ABOVE_TARGET_TEMP_C, CUT_OUT_ABOVE_TARGET_TEMP_C, EXCESSIVE_HEAT_TEMP_C);
     println!("Nucleate {} ms , {:.2} mA", NUCLEATION_DURATION_MS, MAX_NUCLEATION_CURRENT_MA);
     println!("Elongate: Imax {:.2} mA Vmax: {:.1} Term {:.1} Ω ", 
         MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,  CYCLIC_LOWV_TERMINATION_OHMS);
