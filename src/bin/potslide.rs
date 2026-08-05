@@ -83,7 +83,7 @@ const MAX_ELONGATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * ELONGATION_CURREN
 const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 
 /// Highest voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
-const CYCLIC_GROWTH_PEAK_V: f32 = 2.2;
+const CYCLIC_GROWTH_PEAK_V: f32 = 2.4;
 /// Lowest voltage to use during Cycling phase, where true inter-electrode resistance can be measured. 
 const CYCLIC_GROWTH_FLOOR_V: f32 = 1.3;
 /// Voltage at which to measure "Low V" minimum resistance
@@ -638,13 +638,16 @@ fn set_all_anode_connections(connections: &mut [bool], active: bool)
 fn anode_connections_at_time_ms(phase_duration_ms: u64, connections: &mut [bool]) 
 {
     // How long each anode should remain connected to the current source
-    const CONNECTION_PERIOD_MS:usize = 2000;
-    let full_cycle_duration_ms  = connections.len() * CONNECTION_PERIOD_MS;
+    const CONNECTION_PERIOD_MS:usize = 1000;
+    let num_connections = connections.len();
+    let full_cycle_duration_ms  = num_connections * CONNECTION_PERIOD_MS;
     // let cycle_count = phase_duration_ms / full_cycle_duration_ms;
     let cycle_modulo_ms = (phase_duration_ms as usize) % full_cycle_duration_ms;
-    let active_idx = cycle_modulo_ms / CONNECTION_PERIOD_MS;
+    let primary_active_idx = cycle_modulo_ms / CONNECTION_PERIOD_MS;
+    let secondary_active_idx = if primary_active_idx > 0 { primary_active_idx - 1} else { num_connections - 1 };
     connections.fill(false);
-    connections[active_idx] = true;
+    connections[primary_active_idx] = true;
+    connections[secondary_active_idx] = true;
     // println!("{} anodes mods {} conns {:?}", phase_duration_ms, cycle_modulo_ms, connections);
 }
 
@@ -671,7 +674,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ELECTROLYTE_TARGET_TEMP_C, CUT_IN_ABOVE_TARGET_TEMP_C, CUT_OUT_ABOVE_TARGET_TEMP_C, EXCESSIVE_HEAT_TEMP_C);
     println!("Nucleate {} ms , {:.2} A/cm2, {:.2} mA max", 
         NUCLEATION_DURATION_MS, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Vmax {:.1}, Term {:.1} Ω ", 
+    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Vmax {:.2}, Term {:.1} Ω ", 
         ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,  CYCLIC_LOWV_TERMINATION_OHMS);
 
 
