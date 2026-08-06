@@ -63,14 +63,14 @@ const INF_INTER_ELECTRODE_OHMS: f32 = 666.;
 const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 0.5;
 
 /// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
-const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*30.; // Approximate area of Twisted pair of 1 mm diameter, about 30 mm long
+const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.0)*30.; // Approximate area of Twisted pair of 1 mm diameter, about 30 mm long
 
 const WARMUP_CURRENT_DENSITY_AMPS_CM2:f32 = 0.001;
 const WARMUP_CURRENT_DENSITY_MA_MM2:f32 = (WARMUP_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 const MAX_WARMUP_CURRENT_MA:f32 = (ELECTRODE_SURFACE_MM2 * WARMUP_CURRENT_DENSITY_MA_MM2).ceil();
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.375; 
+const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4; 
 const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
