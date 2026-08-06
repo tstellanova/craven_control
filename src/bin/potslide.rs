@@ -69,21 +69,22 @@ const WARMUP_CURRENT_DENSITY_AMPS_CM2:f32 = 0.001;
 const WARMUP_CURRENT_DENSITY_MA_MM2:f32 = (WARMUP_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 const MAX_WARMUP_CURRENT_MA:f32 = (ELECTRODE_SURFACE_MM2 * WARMUP_CURRENT_DENSITY_MA_MM2).ceil();
 
-/// Ideal current density for establishing nucleation sites on the cathode surface
-const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.03;
-const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
-/// Maximum allowed current density during Nucleation phase
-const MAX_NUCLEATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
-
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.25; 
+const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.375; 
 const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
 const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 
+/// Ideal current density for establishing nucleation sites on the cathode surface
+const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = ELONGATION_CURRENT_DENSITY_AMPS_CM2/10.;
+const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
+/// Maximum allowed current density during Nucleation phase
+const MAX_NUCLEATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
+
+
 /// Highest voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
-const CYCLIC_GROWTH_PEAK_V: f32 = 2.4;
+const CYCLIC_GROWTH_PEAK_V: f32 = 2.6;
 /// Lowest voltage to use during Cycling phase, where true inter-electrode resistance can be measured. 
 const CYCLIC_GROWTH_FLOOR_V: f32 = 1.3;
 /// Voltage at which to measure "Low V" minimum resistance
@@ -95,6 +96,11 @@ const CYCLIC_HIGHV_DURATION_MS: u64 = 240*1000;
 const CYCLIC_LOWV_DURATION_MS: u64 = 20*1000;
 /// Total duration of the combined high/low Cyclic phase drive cycle
 const CYCLIC_PERIOD_MS: u64 = CYCLIC_LOWV_DURATION_MS + CYCLIC_HIGHV_DURATION_MS;
+
+
+const ANODE_ELONGATION_ROT_HZ: usize = 2;
+/// Minimum time an anode should remain connected to current source during elongation phase
+const ANODE_ELONGATION_CONNECT_PERIOD_MS:usize = 1000/ANODE_ELONGATION_ROT_HZ;
 
 /// The minimum increment for drive current, as specified in the current source docs
 const MIN_DRIVE_CURRENT_INCR_MA: f32 = 1.0;
@@ -594,6 +600,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
         }
         DrivePhase::Holding => {
+            set_all_anode_connections(&mut state.anode_connections, true);
             new_drive_ma = HOLDING_PROBE_CURRENT_MA;
         }
         DrivePhase::Max => {
@@ -638,12 +645,11 @@ fn set_all_anode_connections(connections: &mut [bool], active: bool)
 fn anode_connections_at_time_ms(phase_duration_ms: u64, connections: &mut [bool]) 
 {
     // How long each anode should remain connected to the current source
-    const CONNECTION_PERIOD_MS:usize = 1000;
     let num_connections = connections.len();
-    let full_cycle_duration_ms  = num_connections * CONNECTION_PERIOD_MS;
+    let full_cycle_duration_ms  = num_connections * ANODE_ELONGATION_CONNECT_PERIOD_MS;
     // let cycle_count = phase_duration_ms / full_cycle_duration_ms;
     let cycle_modulo_ms = (phase_duration_ms as usize) % full_cycle_duration_ms;
-    let primary_active_idx = cycle_modulo_ms / CONNECTION_PERIOD_MS;
+    let primary_active_idx = cycle_modulo_ms / ANODE_ELONGATION_CONNECT_PERIOD_MS;
     let secondary_active_idx = if primary_active_idx > 0 { primary_active_idx - 1} else { num_connections - 1 };
     connections.fill(false);
     connections[primary_active_idx] = true;
@@ -674,8 +680,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ELECTROLYTE_TARGET_TEMP_C, CUT_IN_ABOVE_TARGET_TEMP_C, CUT_OUT_ABOVE_TARGET_TEMP_C, EXCESSIVE_HEAT_TEMP_C);
     println!("Nucleate {} ms , {:.2} A/cm2, {:.2} mA max", 
         NUCLEATION_DURATION_MS, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Vmax {:.2}, Term {:.1} Ω ", 
-        ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,  CYCLIC_LOWV_TERMINATION_OHMS);
+    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Vmax {:.2}, Rot {} Hz, Term {:.1} Ω ", 
+        ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,  ANODE_ELONGATION_ROT_HZ,
+        CYCLIC_LOWV_TERMINATION_OHMS);
 
 
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
