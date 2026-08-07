@@ -98,9 +98,8 @@ const CYCLIC_LOWV_DURATION_MS: u64 = 20*1000;
 const CYCLIC_PERIOD_MS: u64 = CYCLIC_LOWV_DURATION_MS + CYCLIC_HIGHV_DURATION_MS;
 
 
-const ANODE_ELONGATION_ROT_HZ: usize = 2;
 /// Minimum time an anode should remain connected to current source during elongation phase
-const ANODE_ELONGATION_CONNECT_PERIOD_MS:usize = 1000/ANODE_ELONGATION_ROT_HZ;
+const ANODE_ELONGATION_CONNECT_PERIOD_MS:usize = 500;
 
 /// The minimum increment for drive current, as specified in the current source docs
 const MIN_DRIVE_CURRENT_INCR_MA: f32 = 1.0;
@@ -680,8 +679,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ELECTROLYTE_TARGET_TEMP_C, CUT_IN_ABOVE_TARGET_TEMP_C, CUT_OUT_ABOVE_TARGET_TEMP_C, EXCESSIVE_HEAT_TEMP_C);
     println!("Nucleate {} ms , {:.2} A/cm2, {:.2} mA max", 
         NUCLEATION_DURATION_MS, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Vmax {:.2}, Rot {} Hz, Term {:.1} Ω ", 
-        ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,  ANODE_ELONGATION_ROT_HZ,
+    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Vmax {:.2}, Rot {:.2} ms, Term {:.1} Ω ", 
+        ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,  ANODE_ELONGATION_CONNECT_PERIOD_MS,
         CYCLIC_LOWV_TERMINATION_OHMS);
 
 
