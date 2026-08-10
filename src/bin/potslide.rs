@@ -1,5 +1,12 @@
-// #![allow(unused)]
-
+//!
+//! This is a Modbus-based controller for the MK03 craven electrolytic crucible. 
+//! Features include:
+//! - concentric tubular anode ring with multiple anode supply wires (typically eight)
+//! - optional periodic rotation of anode supply drive
+//! - simple linear wire/rod cathode (geometry used for current density calculations)
+//! - optional linear rail motion of cathode immerse/extract (where the name potslide comes from)
+//!
+//! 
 
 use std::time::Duration;
 use tokio::time::{sleep, sleep_until};
@@ -53,38 +60,47 @@ const MIN_ELECTRODE_CHECK_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C - 12.;
 /// The temperature at which the heater should cut in (turn on)
 const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 2.;
 /// The temperature at which the heater should cut out (turn off)
-const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 10.;
+const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 6.;
+/// How much higher than target temperature is "excessive" ?
+const EXCESSIVE_HEAT_DELTA_C: f32 = 12.;
 /// Above this temperature the furnace heat is out of control
-const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + 22.5;
+const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + EXCESSIVE_HEAT_DELTA_C;
 
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
 const INF_INTER_ELECTRODE_OHMS: f32 = 666.;
 /// Below this resistance value we terminate the Cyclic phase
 const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 0.5;
 
+/// Limit of the current supply
+const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
+
 /// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
 const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.0)*30.; // Approximate area of Twisted pair of 1 mm diameter, about 30 mm long
+// const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(4.0)*20.; // Approximate area of Twisted pair of 4 mm diameter, about 25 mm long
 
 const WARMUP_CURRENT_DENSITY_AMPS_CM2:f32 = 0.001;
 const WARMUP_CURRENT_DENSITY_MA_MM2:f32 = (WARMUP_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
-const MAX_WARMUP_CURRENT_MA:f32 = (ELECTRODE_SURFACE_MM2 * WARMUP_CURRENT_DENSITY_MA_MM2).ceil();
+const NOM_WARMUP_CURRENT_MA: f32 = (ELECTRODE_SURFACE_MM2 * WARMUP_CURRENT_DENSITY_MA_MM2).ceil();
+const MAX_WARMUP_CURRENT_MA:f32 = f32::min(MAX_DRIVE_CURRENT_MA,  NOM_WARMUP_CURRENT_MA);
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
 const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4; 
 const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
+const NOM_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
 /// Maximum allowed current density during Cyclic growth phase
-const MAX_ELONGATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
+const MAX_ELONGATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_ELONGATION_CURRENT_MA);
 const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
 const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = ELONGATION_CURRENT_DENSITY_AMPS_CM2/10.;
 const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
+const NOM_NUCLEATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
 /// Maximum allowed current density during Nucleation phase
-const MAX_NUCLEATION_CURRENT_MA:f32 =  ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
+const MAX_NUCLEATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_NUCLEATION_CURRENT_MA);
 
 
-/// Highest voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
-const CYCLIC_GROWTH_PEAK_V: f32 = 2.6;
+/// Highest possible voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
+const CYCLIC_GROWTH_PEAK_V: f32 = 3.2;
 /// Lowest voltage to use during Cycling phase, where true inter-electrode resistance can be measured. 
 const CYCLIC_GROWTH_FLOOR_V: f32 = 1.3;
 /// Voltage at which to measure "Low V" minimum resistance
@@ -99,7 +115,11 @@ const CYCLIC_PERIOD_MS: u64 = CYCLIC_LOWV_DURATION_MS + CYCLIC_HIGHV_DURATION_MS
 
 
 /// Minimum time an anode should remain connected to current source during elongation phase
-const ANODE_ELONGATION_CONNECT_PERIOD_MS:usize = 500;
+const ANODE_ELONGATION_CONNECT_PERIOD_MS:usize = 1000;
+const ANODE_CONNECTION_CHANGE_MS:usize = ANODE_ELONGATION_CONNECT_PERIOD_MS / 5;
+const NUM_ANODE_PAIRS:usize = 4;
+// const FULL_ANODE_CYCLE_DURATION_MS: usize  = NUM_ANODE_PAIRS * ANODE_ELONGATION_CONNECT_PERIOD_MS;
+
 
 /// The minimum increment for drive current, as specified in the current source docs
 const MIN_DRIVE_CURRENT_INCR_MA: f32 = 1.0;
@@ -158,7 +178,7 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
 
     ctx.set_slave(Slave(NODEID_WDCU3003_IV_ADC));
     let wdc3003_vals: Vec<u16> = ctx.read_holding_registers(0, 10).await??;
-    print!("wdc3003_vals: {:?}", wdc3003_vals);
+    println!("wdc3003_vals: {:?}", wdc3003_vals);
 
     // supplies current to the cathode and anodes
     ping_one_modbus_node_id(ctx,NODEID_YKPVCCS010_CURR_SRC, REG_NODEID_YKPVCCS010_CURR_SRC).await?;
@@ -338,8 +358,10 @@ pub struct ElectrodeState {
 
     /// Timestamp when each phase started
     phase_starts_utc_ms: [i64; DrivePhase::Max as usize],
+    /// The current primary active anode index
+    primary_anode_idx: usize,
     /// Whether a given anode is connected to the current supply 
-    anode_connections: [bool; 4],
+    anode_connections: [bool; NUM_ANODE_PAIRS],
 }
 
 /// State the electrode controller is reset to when we're in "warmup" mode below the active melt temperature
@@ -359,7 +381,8 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             reported_drive_ma:0.,
             measured_ma:0.,
             measured_volts:0., 
-            anode_connections: [false; 4],
+            primary_anode_idx: 0,
+            anode_connections: [false; NUM_ANODE_PAIRS],
             phase_starts_utc_ms: [0; DrivePhase::Max as usize],
         }; 
 
@@ -486,9 +509,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 ) 
 -> Result<(), Box<dyn std::error::Error>> 
 {    
-    // ensure that anode current outputs are set correctly
-    write_wav_octo_relays(ctx, &state.anode_connections).await?;
-
     // Drive output current pulse based on prior settings, and measure result
     let (measured_volts, measured_milliamps, measured_ohms) = 
         drive_current_and_measure(ctx, state, CURRENT_SOURCE_WAIT_TIME).await?;
@@ -520,10 +540,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     state.measured_ohms = measured_ohms;
     state.measured_volts = measured_volts;
     state.measured_ma = measured_milliamps;
-    state.anode_connections.fill(false);
     
     match state.drive_phase {
         DrivePhase::Fresh => {
+            set_all_anode_connections(&mut state.anode_connections, false);
             state.phase_starts_utc_ms[DrivePhase::Fresh as usize] = state.phase_start_ms;
             // just transition to next phase
             new_drive_ma = trans_warmup_phase(state, after_drive_utc_ms);
@@ -531,6 +551,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Warmup => {
             // while the melt is warming up, monitor the current throughput 
             new_drive_ma = WARMUP_CURRENT_MA;
+            set_all_anode_connections(&mut state.anode_connections, true);
             if phase_duration_ms > WARMUP_PHASE_DUR_MS 
                 && state.measured_ma > (new_drive_ma / 2.)  
                 && ohms_ewma_valid 
@@ -550,15 +571,16 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             } 
         }
         DrivePhase::Elongation => {
-            anode_connections_at_time_ms(phase_duration_ms, &mut state.anode_connections);
+            anode_connections_at_time_ms(phase_duration_ms, state);
+
             let goal_drive_volts = cyclic_voltage_at_time_ms(phase_duration_ms);
             // calculate current value for (nearly) constant voltage
             if ohms_ewma_valid {
                 new_drive_ma = (goal_drive_volts * 1000.) / state.measured_ohms;
 
-                // cap at some reasonable limit
-                if new_drive_ma > MAX_ELONGATION_CURRENT_MA {
-                    println!("Maxed {:.2} --> {:.2} mA", new_drive_ma, MAX_ELONGATION_CURRENT_MA);
+                // cap at the current density allowed for this phase
+                if new_drive_ma >  MAX_ELONGATION_CURRENT_MA {
+                    //println!("Maxed {:.2} --> {:.2} mA", new_drive_ma, MAX_ELONGATION_CURRENT_MA);
                     new_drive_ma = MAX_ELONGATION_CURRENT_MA;
                 }
 
@@ -607,6 +629,13 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         }
     };
 
+
+    // ensure that anode drive outputs are set correctly
+    let anode_cycle_modulo_ms: usize = (phase_duration_ms as usize) % ANODE_ELONGATION_CONNECT_PERIOD_MS;
+    if anode_cycle_modulo_ms < ANODE_CONNECTION_CHANGE_MS {
+        write_wav_octo_relays(ctx, &state.anode_connections).await?;
+    }
+
     // Now, update the drive current for the next main loop iteration
     // state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
     state.target_drive_ma = new_drive_ma;
@@ -640,19 +669,26 @@ fn set_all_anode_connections(connections: &mut [bool], active: bool)
 }
 
 ///
-/// Calculate which anodes are connected (via relay switch) to the current supply at the given time
-fn anode_connections_at_time_ms(phase_duration_ms: u64, connections: &mut [bool]) 
+/// Calculate which anodes drive wires are connected (via relay switch) to the current supply at the given time
+fn anode_connections_at_time_ms(phase_duration_ms: u64, state: &mut ElectrodeState) 
 {
-    // How long each anode should remain connected to the current source
-    let num_connections = connections.len();
-    let full_cycle_duration_ms  = num_connections * ANODE_ELONGATION_CONNECT_PERIOD_MS;
-    // let cycle_count = phase_duration_ms / full_cycle_duration_ms;
-    let cycle_modulo_ms = (phase_duration_ms as usize) % full_cycle_duration_ms;
-    let primary_active_idx = cycle_modulo_ms / ANODE_ELONGATION_CONNECT_PERIOD_MS;
-    let secondary_active_idx = if primary_active_idx > 0 { primary_active_idx - 1} else { num_connections - 1 };
-    connections.fill(false);
-    connections[primary_active_idx] = true;
-    connections[secondary_active_idx] = true;
+    // we rate-limit how frequently the anode drive rotation is allowed to advance
+    let cycle_modulo_ms: usize = (phase_duration_ms as usize) % ANODE_ELONGATION_CONNECT_PERIOD_MS;
+    if cycle_modulo_ms < ANODE_CONNECTION_CHANGE_MS {
+        // We have a primary active anode and a "trailing" secondary active anode:
+        // this helps provide more drive current as well as smooth the electric field changes.
+        let secondary_active_idx =  state.primary_anode_idx;
+        if state.primary_anode_idx == 0 {
+            state.primary_anode_idx = 1;
+        }
+        else {
+            state.primary_anode_idx = (state.primary_anode_idx + 1) % NUM_ANODE_PAIRS;
+        }
+
+        state.anode_connections.fill(false);
+        state.anode_connections[state.primary_anode_idx] = true;
+        state.anode_connections[secondary_active_idx] = true;
+    }
     // println!("{} anodes mods {} conns {:?}", phase_duration_ms, cycle_modulo_ms, connections);
 }
 
