@@ -75,8 +75,8 @@ const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 0.5;
 const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
 
 /// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
-const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.0)*30.; // Approximate area of Twisted pair of 1 mm diameter, about 30 mm long
-// const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(4.0)*20.; // Approximate area of Twisted pair of 4 mm diameter, about 25 mm long
+// const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.0)*30.; // Approximate area of twisted pair of 1 mm diameter, about 30 mm long
+const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*30.; // Approximate area of rod of 2 mm diameter, about 30 mm long
 
 const WARMUP_CURRENT_DENSITY_AMPS_CM2:f32 = 0.001;
 const WARMUP_CURRENT_DENSITY_MA_MM2:f32 = (WARMUP_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
@@ -116,7 +116,7 @@ const CYCLIC_PERIOD_MS: u64 = CYCLIC_LOWV_DURATION_MS + CYCLIC_HIGHV_DURATION_MS
 
 /// Minimum time an anode should remain connected to current source during elongation phase
 const ANODE_ELONGATION_CONNECT_PERIOD_MS:usize = 1000;
-const ANODE_CONNECTION_CHANGE_MS:usize = ANODE_ELONGATION_CONNECT_PERIOD_MS / 5;
+const ANODE_CONNECTION_CHANGE_MS:usize = ANODE_ELONGATION_CONNECT_PERIOD_MS / 3;
 const NUM_ANODE_PAIRS:usize = 4;
 // const FULL_ANODE_CYCLE_DURATION_MS: usize  = NUM_ANODE_PAIRS * ANODE_ELONGATION_CONNECT_PERIOD_MS;
 
@@ -631,10 +631,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
 
     // ensure that anode drive outputs are set correctly
-    let anode_cycle_modulo_ms: usize = (phase_duration_ms as usize) % ANODE_ELONGATION_CONNECT_PERIOD_MS;
-    if anode_cycle_modulo_ms < ANODE_CONNECTION_CHANGE_MS {
+    // let anode_cycle_modulo_ms: usize = (phase_duration_ms as usize) % ANODE_ELONGATION_CONNECT_PERIOD_MS;
+    // if anode_cycle_modulo_ms < ANODE_CONNECTION_CHANGE_MS {
         write_wav_octo_relays(ctx, &state.anode_connections).await?;
-    }
+    // }
 
     // Now, update the drive current for the next main loop iteration
     // state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
