@@ -12,24 +12,21 @@ use craven_control::*;
 
 /// Tells the SMC05 to start (or stop) the preprogrammed loop
 const START_STOP_OP_COMMAND: u16 = 3;
-/// Action Mode that runs a distance cycle (by pulses) and then stops
-const ACTION_PROCESS_MODE_DISTANCE_LOOP: u16 = 6;
+
 
 #[derive(Debug, Clone)]
 pub struct StepperDriverState {
     /// Last time the driver status was checked
-    last_status_check_ms: i64,
-    prior_motion_direction: u16,
-    prior_pulse_count: u16,
-    prior_action_count: u16,
+    dipper_last_status_check_ms: i64,
+    /// The prior direction of the SMC05 dipper motion
+    dipper_prior_motion_direction: u16,
+    /// The prior SMC05 pulse count (which indicates distance traveled)
+    dipper_prior_pulse_count: u16,
+    /// The prior SMC05 action count (which indicates how many actions have run)
+    dipper_prior_action_count: u16,
 }
 
-async fn start_action_loop(ctx: &mut tokio_modbus::client::Context) 
--> Result<(), Box<dyn std::error::Error>> 
-{
-    ctx.write_single_register(REG_SMC05_OPERATION_MODE, START_STOP_OP_COMMAND).await?;
-    Ok(())
-}
+
 
 async fn start_motion(ctx: &mut tokio_modbus::client::Context, motion: u16) 
 -> Result<(), Box<dyn std::error::Error>> 
@@ -37,7 +34,7 @@ async fn start_motion(ctx: &mut tokio_modbus::client::Context, motion: u16)
     println!("start motion: {}", motion);
     ctx.write_single_register(REG_SMC05_OPERATION_MODE, motion).await?;
     sleep(Duration::from_millis(25)).await;
-    let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 5).await??;
+    let status_resp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_CUR_MOTOR_STATUS, 5).await??;
     println!("> start status 0x1A: {:?}", status_resp);
     let opstatus = status_resp[0];
     let direction = status_resp[1];
@@ -68,7 +65,7 @@ async fn stop_motion(ctx: &mut tokio_modbus::client::Context)
 -> Result<(), Box<dyn std::error::Error>> 
 
 {
-    let status_resp: Vec<u16> = ctx.read_holding_registers(0x001A, 5).await??;
+    let status_resp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_CUR_MOTOR_STATUS, 5).await??;
     println!("> stop status 0x1A: {:?}", status_resp);
     let opstatus = status_resp[0];
     let direction = status_resp[1];
@@ -85,7 +82,6 @@ async fn stop_motion(ctx: &mut tokio_modbus::client::Context)
 /// 
 async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
 {
-
     // measures dual type-K thermocouples
     ping_one_modbus_node_id(ctx, NODEID_YKKTC1202_DUAL_TK, REG_NODEID_YKKTC1202_DUAL_TK).await?;
 
@@ -110,6 +106,49 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     Ok(())
 }
 
+async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context, 
+    state: &mut StepperDriverState, current_utc_ms: i64)
+    -> Result<(), Box<dyn std::error::Error>> 
+{
+    /// Action Mode that runs a distance cycle (by pulses) and then stops
+    const ACTION_PROCESS_MODE_DISTANCE_LOOP: u16 = 6;
+
+    let (op_status, motion_direction, pulse_count, action_count) = read_smc05_motor_status(ctx).await?;
+
+    if 0 == state.dipper_last_status_check_ms {
+        // "Action process mode" -- running preprogrammed loop
+        ctx.write_single_register(REG_SMC05_ACTION_PROCESS_MODE, ACTION_PROCESS_MODE_DISTANCE_LOOP).await??;
+        state.dipper_prior_motion_direction = motion_direction;
+        state.dipper_prior_action_count = action_count;
+        state.dipper_prior_pulse_count = pulse_count;
+        state.dipper_last_status_check_ms = current_utc_ms;
+    }
+
+    if action_count != state.dipper_prior_action_count {
+        println!("{} New Action started!",current_utc_ms);
+    }
+    // If preprogrammed motion loop has finished, start it again:
+    if op_status == 0 { // "Stopped"
+        if motion_direction == state.dipper_prior_motion_direction  {
+            if pulse_count == state.dipper_prior_pulse_count {
+                // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
+                if action_count == state.dipper_prior_action_count {
+                    println!("{} Restart cycle", current_utc_ms);
+                    // ctx.write_single_register(REG_SMC05_OPERATION_MODE, START_STOP_OP_COMMAND).await?;
+                    start_smc05_action_loop(ctx).await?;
+                }
+            }
+        }
+    }
+
+    state.dipper_prior_motion_direction = motion_direction;
+    state.dipper_prior_action_count = action_count;
+    state.dipper_prior_pulse_count = pulse_count;
+    state.dipper_last_status_check_ms = current_utc_ms;
+
+    Ok(())
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
@@ -128,25 +167,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
     sleep(Duration::from_millis(50)).await;
 
-    // let config_resp: Vec<u16> = ctx.read_holding_registers(0x0000, 24).await??;
-    // println!("> config 0x000 (24):\r\n {:?}", config_resp);
+    let mut driver_state: StepperDriverState = StepperDriverState { 
+        dipper_last_status_check_ms: 0, 
+        dipper_prior_motion_direction: 0, 
+        dipper_prior_pulse_count: 0, 
+        dipper_prior_action_count: 0, 
+    };
 
-    let status_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
-    println!("> start status 0x001A: {:?}", status_rsp);
-    let orig_motion_direction = status_rsp[1];
-    let orig_pulse_count = status_rsp[4];
-    let orig_action_count = status_rsp[8];
+    // // let config_resp: Vec<u16> = ctx.read_holding_registers(0x0000, 24).await??;
+    // // println!("> config 0x000 (24):\r\n {:?}", config_resp);
 
-    // "Action process mode" -- running preprogrammed loop
-    ctx.write_single_register(REG_SMC05_ACTION_PROCESS_MODE, ACTION_PROCESS_MODE_DISTANCE_LOOP).await?;
+    
+    // // let status_rsp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_CUR_MOTOR_STATUS, 11).await??;
+    // // println!("> start status: {:?}", status_rsp);
+    // // let orig_motion_direction = status_rsp[1];
+    // // let orig_pulse_count = status_rsp[4];
+    // // let orig_action_count = status_rsp[8];
+
+    // let (_orig_op_status, orig_motion_direction, orig_pulse_count, orig_action_count) = read_smc05_motor_status(&mut ctx).await?;
+
+    // // "Action process mode" -- running preprogrammed loop
+    // ctx.write_single_register(REG_SMC05_ACTION_PROCESS_MODE, ACTION_PROCESS_MODE_DISTANCE_LOOP).await?;
 
     let start_time_ms = chrono::Utc::now().timestamp_millis();
-    let mut driver_state: StepperDriverState = StepperDriverState { 
-        last_status_check_ms: start_time_ms, 
-        prior_motion_direction: orig_motion_direction, 
-        prior_pulse_count: orig_pulse_count, 
-        prior_action_count: orig_action_count, 
-    };
 
     // "start" the preprogrammed motion loop (which is like 25 mm forward and back, multiple cycles)
     let mut continue_running = true;
@@ -154,45 +197,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let current_utc_dt = chrono::Utc::now();
         let current_utc_ms = current_utc_dt.timestamp_millis();
 
-        let status_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
-        // println!("{} > status 0x001A: {:?}", current_utc_ms, status_rsp);
-        let op_status = status_rsp[0];
-        let motion_direction = status_rsp[1];
-        let pulse_count = status_rsp[4];
-        let action_count = status_rsp[8];
-        println!("op {} dir {} pulse {} action {}",op_status, motion_direction, pulse_count, action_count);
+        manage_dipper_motion(&mut ctx, &mut driver_state, current_utc_ms).await?;
 
-        if action_count != driver_state.prior_action_count {
-            println!("{} New Action started!",current_utc_ms);
-        }
-
-        // If preprogrammed motion loop has finished, start it again:
-        if op_status == 0 { // "Stopped"
-            if motion_direction == driver_state.prior_motion_direction  {
-                if pulse_count == driver_state.prior_pulse_count {
-                    // if action_count doesn't equal prior, then we're starting a new round?
-                    if action_count == driver_state.prior_action_count {
-                        println!("{} Restart cycle", current_utc_ms);
-                        // ctx.write_single_register(REG_SMC05_OPERATION_MODE, START_STOP_OP_COMMAND).await?;
-                        start_action_loop(&mut ctx).await?;
-                    }
-                }
-            }
-        }
-
-        driver_state.prior_motion_direction = motion_direction;
-        driver_state.prior_action_count = action_count;
-        driver_state.prior_pulse_count = pulse_count;
-        driver_state.last_status_check_ms = current_utc_ms;
-
-        if (current_utc_ms - start_time_ms) > 60000 {
+        if (current_utc_ms - start_time_ms) > 30000 {
             continue_running = false;
         }
         else {
             // TODO this needs to align with the "reversal" pauses , and any pauses between cycles
             sleep(Duration::from_millis(2000)).await;
         }
-        
     }
 
 

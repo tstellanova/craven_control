@@ -66,6 +66,9 @@ pub const REG_YKPVCCS_MONITOR_MILLIAMPS: u16  = 0x11; // read YK-PVCCS ammeter
 pub const REG_NODEID_SMC05: u16 = 0x0018; 
 /// SMC05 action mode, such as stepping forward and back or running a preprogrammed action loop
 pub const REG_SMC05_ACTION_PROCESS_MODE: u16 = 0x0000; 
+
+/// SMC05 Current motor operating status: 0 stop, 1 acceleration, 2 deceleration , 3 uniform speed 
+pub const REG_SMC05_CUR_MOTOR_STATUS:u16  = 0x001A;
 /// SMC05 fwd/rev/start/stop operations
 pub const REG_SMC05_OPERATION_MODE: u16 = 0x0030; 
 
@@ -383,5 +386,29 @@ pub async fn write_wav_octo_relays(ctx: &mut tokio_modbus::client::Context, chan
 {
     ctx.set_slave(Slave(NODEID_WAV_OCTO_RELAY));
     ctx.write_multiple_coils(0x0000, &channel_vals).await??;
+    Ok(())
+}
+
+/// # Returns 
+/// (motion_direction, pulse_count, action_count) 
+pub async fn read_smc05_motor_status(ctx: &mut tokio_modbus::client::Context)
+-> Result<(u16, u16, u16, u16), Box<dyn std::error::Error>> 
+{
+    let status_rsp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_CUR_MOTOR_STATUS, 11).await??;
+    // println!("> SMC05 status: {:?}", status_rsp);
+    let op_status = status_rsp[0];
+    let motion_direction = status_rsp[1];
+    let pulse_count = status_rsp[4];
+    let action_count = status_rsp[8];
+    Ok((op_status, motion_direction, pulse_count, action_count))
+}
+
+pub async fn start_smc05_action_loop(ctx: &mut tokio_modbus::client::Context) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    /// Tells the SMC05 to start (or stop) the preprogrammed loop
+    const START_STOP_OP_COMMAND: u16 = 3;
+
+    ctx.write_single_register(REG_SMC05_OPERATION_MODE, START_STOP_OP_COMMAND).await??;
     Ok(())
 }
