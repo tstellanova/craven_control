@@ -86,7 +86,7 @@ pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
 pub async fn ping_one_modbus_node_id(ctx: &mut tokio_modbus::client::Context, node_id: u8,  reg_node_id: u16) 
     -> Result<(), Box<dyn std::error::Error>>
 {
-    println!("Read node ID from node {node_id:X?}, reg 0x{reg_node_id:X?} ... ");
+    println!("Read node ID from node {node_id} ({node_id:X?}), reg 0x{reg_node_id:X?} ... ");
     ctx.set_slave(Slave(node_id));
     sleep(Duration::from_millis(50)).await;
 
@@ -95,11 +95,11 @@ pub async fn ping_one_modbus_node_id(ctx: &mut tokio_modbus::client::Context, no
 
     let existing_node_id = read_rsp[0] as u8;
     if existing_node_id != node_id {
-        println!("Node ID {node_id:X?} reports node ID of {existing_node_id:X?}");
+        println!("Node ID {node_id} ({node_id:X?}) reports node ID of {existing_node_id} ({existing_node_id:X?})");
         panic!("Couldn't verify the old node ID");
     }
     else {
-        println!("Node ID {node_id:X?} verified");
+        println!("Node ID {node_id} ({node_id:X?}) verified");
     }
 
     Ok(())
@@ -394,6 +394,7 @@ pub async fn write_wav_octo_relays(ctx: &mut tokio_modbus::client::Context, chan
 pub async fn read_smc05_motor_status(ctx: &mut tokio_modbus::client::Context)
 -> Result<(u16, u16, u16, u16), Box<dyn std::error::Error>> 
 {
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
     let status_rsp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_CUR_MOTOR_STATUS, 11).await??;
     // println!("> SMC05 status: {:?}", status_rsp);
     let op_status = status_rsp[0];
@@ -408,7 +409,7 @@ pub async fn start_smc05_action_loop(ctx: &mut tokio_modbus::client::Context)
 {
     /// Tells the SMC05 to start (or stop) the preprogrammed loop
     const START_STOP_OP_COMMAND: u16 = 3;
-
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
     ctx.write_single_register(REG_SMC05_OPERATION_MODE, START_STOP_OP_COMMAND).await??;
     Ok(())
 }

@@ -117,6 +117,7 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
 
     if 0 == state.dipper_last_status_check_ms {
         // "Action process mode" -- running preprogrammed loop
+        ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
         ctx.write_single_register(REG_SMC05_ACTION_PROCESS_MODE, ACTION_PROCESS_MODE_DISTANCE_LOOP).await??;
         state.dipper_prior_motion_direction = motion_direction;
         state.dipper_prior_action_count = action_count;

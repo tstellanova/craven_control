@@ -187,6 +187,9 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     // controls 4-pair anode connection relays
     ping_one_modbus_node_id(ctx, NODEID_WAV_OCTO_RELAY, REG_NODEID_WAVESHARE_V2).await?;
 
+    // controls dipping motion of cathode
+    ping_one_modbus_node_id(ctx, NODEID_SMC05_STEP_DRIVER, REG_NODEID_SMC05).await?;
+
     Ok(())
 }
 
@@ -356,12 +359,24 @@ pub struct ElectrodeState {
     /// The actual measured potential across the electrodes 
     measured_volts: f32,
 
-    /// Timestamp when each phase started
-    phase_starts_utc_ms: [i64; DrivePhase::Max as usize],
     /// The current primary active anode index
     primary_anode_idx: usize,
     /// Whether a given anode is connected to the current supply 
     anode_connections: [bool; NUM_ANODE_PAIRS],
+
+    /// Whether or not the SMC05 dipper is enabled
+    dipper_enabled: bool, 
+    /// Last time the SMC05 driver status was checked
+    dipper_last_status_check_ms: i64,
+    /// The prior direction of the SMC05 dipper motion
+    dipper_prior_motion_direction: u16,
+    /// The prior SMC05 pulse count (which indicates distance traveled)
+    dipper_prior_pulse_count: u16,
+    /// The prior SMC05 action count (which indicates how many actions have run)
+    dipper_prior_action_count: u16,
+
+    /// Timestamp when each phase started
+    phase_starts_utc_ms: [i64; DrivePhase::Max as usize],
 }
 
 /// State the electrode controller is reset to when we're in "warmup" mode below the active melt temperature
@@ -383,6 +398,13 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             measured_volts:0., 
             primary_anode_idx: 0,
             anode_connections: [false; NUM_ANODE_PAIRS],
+
+            dipper_enabled: false,
+            dipper_last_status_check_ms: 0,
+            dipper_prior_motion_direction: 0,
+            dipper_prior_pulse_count: 0,
+            dipper_prior_action_count: 0,
+
             phase_starts_utc_ms: [0; DrivePhase::Max as usize],
         }; 
 
@@ -501,6 +523,12 @@ fn trans_holding_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_dura
     HOLDING_PROBE_CURRENT_MA
 }
 
+fn toggle_dipper_enabled(state: &mut ElectrodeState) {
+    let old_enabled = state.dipper_enabled ;
+    state.dipper_enabled = !old_enabled;
+    println!("Toggled dipper_enabled {} -> {}", old_enabled, state.dipper_enabled);
+}
+
 /// 
 /// Adjust the electrode current based on melt condition and drive phase
 /// 
@@ -519,6 +547,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
     let phase_duration_ms = 
         if state.phase_start_ms <  after_drive_utc_ms {  (after_drive_utc_ms - state.phase_start_ms) as u64 } 
         else { 0 };
+
+    if state.dipper_enabled {
+        manage_dipper_motion(ctx, state, after_drive_utc_ms).await?;
+    }
 
     // reuse old drive current until instructed otherwise
     let mut new_drive_ma: f32;
@@ -692,6 +724,51 @@ fn anode_connections_at_time_ms(phase_duration_ms: u64, state: &mut ElectrodeSta
     // println!("{} anodes mods {} conns {:?}", phase_duration_ms, cycle_modulo_ms, connections);
 }
 
+
+async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context, 
+    state: &mut ElectrodeState, current_utc_ms: i64)
+    -> Result<(), Box<dyn std::error::Error>> 
+{
+    /// Action Mode that runs a distance cycle (by pulses) and then stops
+    const ACTION_PROCESS_MODE_DISTANCE_LOOP: u16 = 6;
+
+    let (op_status, motion_direction, pulse_count, action_count) = read_smc05_motor_status(ctx).await?;
+    println!("op {} dir {} pulse {} action {}",op_status, motion_direction, pulse_count, action_count);
+
+    if state.dipper_last_status_check_ms == 0 {
+        println!("Fresh Dipper");
+        // "Action process mode" -- running preprogrammed loop
+        ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+        ctx.write_single_register(REG_SMC05_ACTION_PROCESS_MODE, ACTION_PROCESS_MODE_DISTANCE_LOOP).await??;
+        state.dipper_prior_motion_direction = motion_direction;
+        state.dipper_prior_action_count = action_count;
+        state.dipper_prior_pulse_count = pulse_count;
+        state.dipper_last_status_check_ms = current_utc_ms;
+    }
+
+    if action_count != state.dipper_prior_action_count {
+        println!("{} New Action started!",current_utc_ms);
+    }
+    // If preprogrammed motion loop has finished, start it again:
+    if op_status == 0 { // "Stopped"
+        if motion_direction == state.dipper_prior_motion_direction  {
+            if pulse_count == state.dipper_prior_pulse_count {
+                // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
+                if action_count == state.dipper_prior_action_count {
+                    println!("{} Restart cycle", current_utc_ms);
+                    start_smc05_action_loop(ctx).await?;
+                }
+            }
+        }
+    }
+
+    state.dipper_prior_motion_direction = motion_direction;
+    state.dipper_prior_action_count = action_count;
+    state.dipper_prior_pulse_count = pulse_count;
+    state.dipper_last_status_check_ms = current_utc_ms;
+
+    Ok(())
+}
 /**
  * Entry point
  */
@@ -723,8 +800,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_ms,heat,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,hvMinR,lvMinR";
-    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.3}" } }
+    const CSV_HEADER: &str =  "epoch_ms,heat,dip,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,hvMinR,lvMinR";
+    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.3}" } }
     
     println!("{}",CSV_HEADER);
     writeln!(csv_writer, "{}", CSV_HEADER)?;
@@ -754,6 +831,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let sleep_timer = sleep(Duration::from_millis(50));
         tokio::pin!(sleep_timer);
 
+        // command handling
         tokio::select! {
             _ = &mut ctrl_c_fut => {
                 eprintln!("\nCtrl-C: Shutting down...");
@@ -779,6 +857,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             },
                             "h" | "holding" => {
                                 trans_holding_phase(&mut electrode_state,  current_utc_ms, 0);
+                            }
+                            "d" | "dip" => {
+                                toggle_dipper_enabled(&mut electrode_state);
                             }
                             other => println!("Unknown command: {other:?}"),
                         }
@@ -810,6 +891,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             break;
         }
 
+
         if (furnace_state.measured_temp_c > MIN_ELECTRODE_CHECK_TEMP_C &&  furnace_state.measured_temp_c < EXCESSIVE_HEAT_TEMP_C) ||
             electrode_state.drive_phase != DrivePhase::Fresh 
         {
@@ -822,13 +904,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         else {
             // println!("drive_phase: {:?} temp: {:.2}", electrode_state.drive_phase, furnace_state.measured_temp_c);
-            electrode_state = INITIAL_ELECTRODE_STATE;
+            //electrode_state = INITIAL_ELECTRODE_STATE;
             electrode_state.phase_start_ms = current_utc_dt.timestamp_millis();
+            // TODO for now dipping motion control is independent of melt state, for testing purposes
+            if electrode_state.dipper_enabled {
+                manage_dipper_motion(&mut ctx, &mut electrode_state, current_utc_dt.timestamp_millis()).await?;
+            }
         }
 
         let log_line = format!( CSV_LINE_FORMAT!(),
             current_utc_dt.timestamp_millis(),
             furnace_state.heater_on as u8,
+            electrode_state.dipper_enabled as u8,
             furnace_state.measured_temp_c,
             electrode_state.target_drive_ma, electrode_state.measured_ma,
             electrode_state.measured_volts, 
