@@ -60,18 +60,63 @@ async fn stop_motion(ctx: &mut tokio_modbus::client::Context)
     Ok(())
 }
 
+/// 
+/// Verify that all the modules we expect to be connected to the RS-485 Modbus are,
+/// in fact, connected.
+/// 
+async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
+{
+
+    // measures dual type-K thermocouples
+    ping_one_modbus_node_id(ctx, NODEID_YKKTC1202_DUAL_TK, REG_NODEID_YKKTC1202_DUAL_TK).await?;
+
+    // measures voltage and current across the electrodes
+    // TODO we can't ping WDCU3003M with a node ID read, because it doesn't expose node ID to Modbus
+    // ping_one_modbus_node_id(ctx, NODEID_WDCU3003_IV_ADC, 0x00).await?;
+
+
+    ctx.set_slave(Slave(NODEID_WDCU3003_IV_ADC));
+    let wdc3003_vals: Vec<u16> = ctx.read_holding_registers(0, 10).await??;
+    println!("wdc3003_vals: {:?}", wdc3003_vals);
+
+    // supplies current to the cathode and anodes
+    ping_one_modbus_node_id(ctx,NODEID_YKPVCCS010_CURR_SRC, REG_NODEID_YKPVCCS010_CURR_SRC).await?;
+
+    // controls furnace on/off
+    // controls 4-pair anode connection relays
+    ping_one_modbus_node_id(ctx, NODEID_WAV_OCTO_RELAY, REG_NODEID_WAVESHARE_V2).await?;
+
+    sleep(Duration::from_millis(100)).await;
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+    let config_resp: Vec<u16> = ctx.read_holding_registers(0x0000, 7).await??;
+    println!("> SMC05 motion config 0x000 (7):\r\n {:?}", config_resp);
+
+    let config_resp: Vec<u16> = ctx.read_holding_registers(0x0018, 1).await??;
+    println!("> SMC05 address:  {:?}", config_resp);
+
+    // ping_one_modbus_node_id(ctx, NODEID_SMC05_STEP_DRIVER, REG_NODEID_SMC05).await?;
+    // ctx.read_holding_registers(REG_NODEID_SMC05, 1).await??;
+
+    Ok(())
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // actual usb device ID of one USB-RS485 adapter
-    let tty_path = "/dev/cu.usbserial-BG02SI88";
-    let baud_rate = 115200;
+    // let tty_path = "/dev/cu.usbserial-BG02SI88";
+    // let baud_rate = 115200;
 
-    let builder = tokio_serial::new(tty_path, baud_rate);
-    let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
+    // let builder = tokio_serial::new(tty_path, baud_rate);
+    // let mut ctx = rtu::attach_slave(SerialStream::open(&builder).unwrap(), Slave(NODEID_DEFAULT));
+    let socket_addr: std::net::SocketAddr = "10.0.1.151:502".parse()?;
+
+    println!("Connecting to: '{socket_addr:?}'");
+    let mut ctx: client::Context = tcp::connect(socket_addr).await?;
+    enumerate_required_modules(&mut ctx).await?;
 
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
-    println!("waiting on set_slave..");
+    // println!("waiting on set_slave..");
     sleep(Duration::from_millis(50)).await;
 
     // let config_resp: Vec<u16> = ctx.read_holding_registers(0x0000, 24).await??;
@@ -79,7 +124,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let read_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
     println!("> config 0x001A: {:?}", read_rsp);
-
 
     // // "Action process mode"
     ctx.write_single_register(0x0000, 6).await?;
@@ -94,12 +138,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // // pulses per rotation?
     // ctx.write_single_register(0x0010, 1600).await??;
 
-    start_reverse(&mut ctx).await?;
-    sleep(Duration::from_millis(1100)).await;
-    start_forward(&mut ctx).await?;
-    sleep(Duration::from_millis(1000)).await;
-    
-    stop_motion(&mut ctx).await?;
+    sleep(Duration::from_secs(5)).await;
+    ctx.write_single_register(0x0030, 3).await?;
+    sleep(Duration::from_millis(10000)).await;
+
+    // for _i in 0..3 {
+    //     sleep(Duration::from_millis(100)).await;
+
+    //     start_reverse(&mut ctx).await?;
+    //     // sleep(Duration::from_millis(1100)).await;
+    //     sleep(Duration::from_millis(3000)).await;
+    //     start_forward(&mut ctx).await?;
+    //     // sleep(Duration::from_millis(1000)).await;
+    //     sleep(Duration::from_millis(3000)).await;
+    //     stop_motion(&mut ctx).await?;
+    // }
 
     // ctx.write_single_register(0x0030, 1).await??;
     // sleep(Duration::from_millis(250)).await;
