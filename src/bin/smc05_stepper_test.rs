@@ -123,7 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // println!("> config 0x000 (24):\r\n {:?}", config_resp);
 
     let read_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
-    println!("> config 0x001A: {:?}", read_rsp);
+    println!("> start config 0x001A: {:?}", read_rsp);
 
     // // "Action process mode"
     ctx.write_single_register(0x0000, 6).await?;
@@ -138,21 +138,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // // pulses per rotation?
     // ctx.write_single_register(0x0010, 1600).await??;
 
-    sleep(Duration::from_secs(5)).await;
+    // "start" the preprogrammed motion (which is like 25 mm forward and back, 3 cycles)
     ctx.write_single_register(0x0030, 3).await?;
-    sleep(Duration::from_millis(10000)).await;
+    for i in 0..150 {
+        let read_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+        println!("{}>  config 0x001A: {:?}", i,read_rsp);
+        sleep(Duration::from_millis(500)).await;
 
-    // for _i in 0..3 {
-    //     sleep(Duration::from_millis(100)).await;
+        // start_reverse(&mut ctx).await?;
+        // // sleep(Duration::from_millis(1100)).await;
+        // sleep(Duration::from_millis(3000)).await;
+        // start_forward(&mut ctx).await?;
+        // // sleep(Duration::from_millis(1000)).await;
+        // sleep(Duration::from_millis(3000)).await;
+        // stop_motion(&mut ctx).await?;
+    }
 
-    //     start_reverse(&mut ctx).await?;
-    //     // sleep(Duration::from_millis(1100)).await;
-    //     sleep(Duration::from_millis(3000)).await;
-    //     start_forward(&mut ctx).await?;
-    //     // sleep(Duration::from_millis(1000)).await;
-    //     sleep(Duration::from_millis(3000)).await;
-    //     stop_motion(&mut ctx).await?;
-    // }
 
     // ctx.write_single_register(0x0030, 1).await??;
     // sleep(Duration::from_millis(250)).await;
