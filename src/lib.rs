@@ -62,16 +62,12 @@ pub const REG_R4DVI04_BAUD: u16 = 0x00FE; // get/set baud for RDVI04, 0-7, ...19
 pub const REG_YKPVCCS_DRIVE_MILLIAMPS: u16  = 0x10; // get/set drive mA for YK-PVCCS
 pub const REG_YKPVCCS_MONITOR_MILLIAMPS: u16  = 0x11; // read YK-PVCCS ammeter
 
-
-// /// Combine two u16 registers into amn f32
-// fn registers_to_f32(registers: &[u16], offset: usize) -> f32 {
-//     let high = registers[offset] as u32;
-//     let low = registers[offset + 1] as u32;
-//     let combined = (high << 16) | low;
-    
-//     // Convert u32 to f32
-//     f32::from_bits(combined)
-// }
+/// Register holding node ID (address) for SMC05
+pub const REG_NODEID_SMC05: u16 = 0x0018; 
+/// SMC05 action mode, such as stepping forward and back or running a preprogrammed action loop
+pub const REG_SMC05_ACTION_PROCESS_MODE: u16 = 0x0000; 
+/// SMC05 fwd/rev/start/stop operations
+pub const REG_SMC05_OPERATION_MODE: u16 = 0x0030; 
 
 /// Combine two u16 registers into an i32
 pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
