@@ -122,8 +122,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // let config_resp: Vec<u16> = ctx.read_holding_registers(0x0000, 24).await??;
     // println!("> config 0x000 (24):\r\n {:?}", config_resp);
 
-    let read_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
-    println!("> start config 0x001A: {:?}", read_rsp);
+    let status_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+    println!("> start status 0x001A: {:?}", status_rsp);
+    let orig_motion_direction = status_rsp[1];
+    let orig_pulse_count = status_rsp[4];
+    let orig_action_count = status_rsp[8];
+    // const ACTION_COUNT_STATUS: u16 = 0;
+    // let action_count  = (ctx.read_holding_registers(ACTION_COUNT_STATUS, 1).await??)[0];
 
     // // "Action process mode"
     ctx.write_single_register(0x0000, 6).await?;
@@ -139,19 +144,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ctx.write_single_register(0x0010, 1600).await??;
 
     // "start" the preprogrammed motion (which is like 25 mm forward and back, 3 cycles)
+    let mut prior_motion_direction = orig_motion_direction;
+    let mut prior_pulse_count = orig_pulse_count;
+    let mut prior_action_count = orig_action_count;
     ctx.write_single_register(0x0030, 3).await?;
-    for i in 0..150 {
-        let read_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
-        println!("{}>  config 0x001A: {:?}", i,read_rsp);
-        sleep(Duration::from_millis(500)).await;
 
-        // start_reverse(&mut ctx).await?;
-        // // sleep(Duration::from_millis(1100)).await;
-        // sleep(Duration::from_millis(3000)).await;
-        // start_forward(&mut ctx).await?;
-        // // sleep(Duration::from_millis(1000)).await;
-        // sleep(Duration::from_millis(3000)).await;
-        // stop_motion(&mut ctx).await?;
+    for i in 0..2 {
+        let status_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
+        println!("> status 0x001A: {:?}", status_rsp);
+
+        let op_status = status_rsp[0];
+        let motion_direction = status_rsp[1];
+        let pulse_count = status_rsp[4];
+        let action_count = status_rsp[8];
+        println!("op {} dir {} pulse {} action {}",op_status, motion_direction, pulse_count, action_count);
+
+        if action_count != prior_action_count {
+            println!("New Action started!");
+        }
+
+        // TODO TEST if preprogrammed motion has finished, start it again:
+        if op_status == 0 { // "Stopped"
+            if motion_direction == prior_motion_direction  {
+                if pulse_count == prior_pulse_count {
+                    // if action_count doesn't equal prior, then we're starting a new round?
+                    if action_count == prior_action_count {
+                        println!("Restarting preprogrammed motion!");
+                        ctx.write_single_register(0x0030, 3).await?;
+                    }
+                }
+            }
+        }
+
+        prior_motion_direction = motion_direction;
+        prior_action_count = action_count;
+        prior_pulse_count = pulse_count;
+
+        // TODO this needs to align with the "reversal" pauses , and pauses between cycles
+        sleep(Duration::from_millis(2000)).await;
+        
     }
 
 
