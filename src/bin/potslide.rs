@@ -526,6 +526,7 @@ fn trans_holding_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_dura
 fn toggle_dipper_enabled(state: &mut ElectrodeState) {
     let old_enabled = state.dipper_enabled ;
     state.dipper_enabled = !old_enabled;
+    state.dipper_last_status_check_ms = 0;
     println!("Toggled dipper_enabled {} -> {}", old_enabled, state.dipper_enabled);
 }
 
@@ -733,10 +734,10 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
     const ACTION_PROCESS_MODE_DISTANCE_LOOP: u16 = 6;
 
     let (op_status, motion_direction, pulse_count, action_count) = read_smc05_motor_status(ctx).await?;
-    println!("op {} dir {} pulse {} action {}",op_status, motion_direction, pulse_count, action_count);
+    //println!("op {} dir {} pulse {} action {}",op_status, motion_direction, pulse_count, action_count);
 
     if state.dipper_last_status_check_ms == 0 {
-        println!("Fresh Dipper");
+        println!("{} Fresh Dipper",current_utc_ms);
         // "Action process mode" -- running preprogrammed loop
         ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
         ctx.write_single_register(REG_SMC05_ACTION_PROCESS_MODE, ACTION_PROCESS_MODE_DISTANCE_LOOP).await??;
@@ -746,26 +747,29 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
         state.dipper_last_status_check_ms = current_utc_ms;
     }
 
-    if action_count != state.dipper_prior_action_count {
-        println!("{} New Action started!",current_utc_ms);
-    }
-    // If preprogrammed motion loop has finished, start it again:
-    if op_status == 0 { // "Stopped"
-        if motion_direction == state.dipper_prior_motion_direction  {
-            if pulse_count == state.dipper_prior_pulse_count {
-                // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
-                if action_count == state.dipper_prior_action_count {
-                    println!("{} Restart cycle", current_utc_ms);
-                    start_smc05_action_loop(ctx).await?;
+    // only check the status periodically, because there can be some pauses and delays between reversals and loops
+    if current_utc_ms - state.dipper_last_status_check_ms > 2000 {
+        if action_count != state.dipper_prior_action_count {
+            println!("{} New Action started!",current_utc_ms);
+        }
+        // If preprogrammed motion loop has finished, start it again:
+        if op_status == 0 { // "Stopped"
+            if motion_direction == state.dipper_prior_motion_direction  {
+                if pulse_count == state.dipper_prior_pulse_count {
+                    // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
+                    if action_count == state.dipper_prior_action_count {
+                        println!("{} Next dip cycle", current_utc_ms);
+                        start_smc05_action_loop(ctx).await?;
+                    }
                 }
             }
         }
-    }
 
-    state.dipper_prior_motion_direction = motion_direction;
-    state.dipper_prior_action_count = action_count;
-    state.dipper_prior_pulse_count = pulse_count;
-    state.dipper_last_status_check_ms = current_utc_ms;
+        state.dipper_prior_motion_direction = motion_direction;
+        state.dipper_prior_action_count = action_count;
+        state.dipper_prior_pulse_count = pulse_count;
+        state.dipper_last_status_check_ms = current_utc_ms;
+    }
 
     Ok(())
 }
@@ -908,7 +912,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             electrode_state.phase_start_ms = current_utc_dt.timestamp_millis();
             // TODO for now dipping motion control is independent of melt state, for testing purposes
             if electrode_state.dipper_enabled {
-                manage_dipper_motion(&mut ctx, &mut electrode_state, current_utc_dt.timestamp_millis()).await?;
+                let dip_res = tokio::time::timeout(MODBUS_TRANSACTION_TIMEOUT, manage_dipper_motion(&mut ctx, &mut electrode_state, current_utc_dt.timestamp_millis())).await;
+                if !dip_res.is_ok() { 
+                    eprintln!("manage_dipper_motion timeout: {:?}",dip_res);
+                    break;
+                }
             }
         }
 

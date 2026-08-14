@@ -395,7 +395,7 @@ pub async fn read_smc05_motor_status(ctx: &mut tokio_modbus::client::Context)
 -> Result<(u16, u16, u16, u16), Box<dyn std::error::Error>> 
 {
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
-    let status_rsp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_CUR_MOTOR_STATUS, 11).await??;
+    let status_rsp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_CUR_MOTOR_STATUS, 9).await??;
     // println!("> SMC05 status: {:?}", status_rsp);
     let op_status = status_rsp[0];
     let motion_direction = status_rsp[1];

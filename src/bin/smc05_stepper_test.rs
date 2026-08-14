@@ -125,27 +125,30 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
         state.dipper_last_status_check_ms = current_utc_ms;
     }
 
-    if action_count != state.dipper_prior_action_count {
-        println!("{} New Action started!",current_utc_ms);
-    }
-    // If preprogrammed motion loop has finished, start it again:
-    if op_status == 0 { // "Stopped"
-        if motion_direction == state.dipper_prior_motion_direction  {
-            if pulse_count == state.dipper_prior_pulse_count {
-                // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
-                if action_count == state.dipper_prior_action_count {
-                    println!("{} Restart cycle", current_utc_ms);
-                    // ctx.write_single_register(REG_SMC05_OPERATION_MODE, START_STOP_OP_COMMAND).await?;
-                    start_smc05_action_loop(ctx).await?;
+    // only check for restart periodically
+    if current_utc_ms - state.dipper_last_status_check_ms > 2000 {
+        if action_count != state.dipper_prior_action_count {
+            println!("{} New Action started!",current_utc_ms);
+        }
+        // If preprogrammed motion loop has finished, start it again:
+        if op_status == 0 { // "Stopped"
+            if motion_direction == state.dipper_prior_motion_direction  {
+                if pulse_count == state.dipper_prior_pulse_count {
+                    // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
+                    if action_count == state.dipper_prior_action_count {
+                        println!("{} Restart cycle", current_utc_ms);
+                        // ctx.write_single_register(REG_SMC05_OPERATION_MODE, START_STOP_OP_COMMAND).await?;
+                        start_smc05_action_loop(ctx).await?;
+                    }
                 }
             }
         }
-    }
 
-    state.dipper_prior_motion_direction = motion_direction;
-    state.dipper_prior_action_count = action_count;
-    state.dipper_prior_pulse_count = pulse_count;
-    state.dipper_last_status_check_ms = current_utc_ms;
+        state.dipper_prior_motion_direction = motion_direction;
+        state.dipper_prior_action_count = action_count;
+        state.dipper_prior_pulse_count = pulse_count;
+        state.dipper_last_status_check_ms = current_utc_ms;
+    }
 
     Ok(())
 }
