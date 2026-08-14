@@ -130,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // const ACTION_COUNT_STATUS: u16 = 0;
     // let action_count  = (ctx.read_holding_registers(ACTION_COUNT_STATUS, 1).await??)[0];
 
-    // // "Action process mode"
+    // // "Action process mode" -- running preprogrammed settings
     ctx.write_single_register(0x0000, 6).await?;
 
     // // forward pulses
@@ -149,9 +149,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut prior_action_count = orig_action_count;
     ctx.write_single_register(0x0030, 3).await?;
 
-    for i in 0..2 {
+    let mut continue_running = true;
+    while continue_running {
+        let current_utc_dt = chrono::Utc::now();
+        let current_utc_ms = current_utc_dt.timestamp_millis();
+
         let status_rsp: Vec<u16> = ctx.read_holding_registers(0x001A, 11).await??;
-        println!("> status 0x001A: {:?}", status_rsp);
+        println!("{} > status 0x001A: {:?}", current_utc_ms, status_rsp);
 
         let op_status = status_rsp[0];
         let motion_direction = status_rsp[1];
@@ -160,7 +164,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("op {} dir {} pulse {} action {}",op_status, motion_direction, pulse_count, action_count);
 
         if action_count != prior_action_count {
-            println!("New Action started!");
+            println!("{} New Action started!",current_utc_ms);
         }
 
         // TODO TEST if preprogrammed motion has finished, start it again:
@@ -169,7 +173,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if pulse_count == prior_pulse_count {
                     // if action_count doesn't equal prior, then we're starting a new round?
                     if action_count == prior_action_count {
-                        println!("Restarting preprogrammed motion!");
+                        println!("{} Restart cycle", current_utc_ms);
                         ctx.write_single_register(0x0030, 3).await?;
                     }
                 }
