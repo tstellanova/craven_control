@@ -472,6 +472,8 @@ fn trans_warmup_phase(state: &mut ElectrodeState, trans_utc_ms: i64)
     state.drive_phase = DrivePhase::Warmup;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Warmup as usize] = trans_utc_ms;
+    disable_dipper_monitor(state);
+
     println!("{} start Warmup phase", 
         trans_utc_ms, 
     );
@@ -514,13 +516,19 @@ fn trans_holding_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_dura
     state.drive_phase = DrivePhase::Holding;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Holding as usize] = trans_utc_ms;
-
+    disable_dipper_monitor(state);
     println!("{} start Holding phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
         trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms
     );
     HOLDING_PROBE_CURRENT_MA
+}
+
+fn disable_dipper_monitor(state: &mut ElectrodeState) {
+    state.dipper_enabled = false;
+    state.dipper_last_status_check_ms = 0;
+    println!("Dipper monitor canceling...");
 }
 
 fn toggle_dipper_enabled(state: &mut ElectrodeState) {
@@ -908,16 +916,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         else {
             // println!("drive_phase: {:?} temp: {:.2}", electrode_state.drive_phase, furnace_state.measured_temp_c);
-            //electrode_state = INITIAL_ELECTRODE_STATE;
             electrode_state.phase_start_ms = current_utc_dt.timestamp_millis();
-            // TODO for now dipping motion control is independent of melt state, for testing purposes
-            if electrode_state.dipper_enabled {
-                let dip_res = tokio::time::timeout(MODBUS_TRANSACTION_TIMEOUT, manage_dipper_motion(&mut ctx, &mut electrode_state, current_utc_dt.timestamp_millis())).await;
-                if !dip_res.is_ok() { 
-                    eprintln!("manage_dipper_motion timeout: {:?}",dip_res);
-                    break;
-                }
-            }
         }
 
         let log_line = format!( CSV_LINE_FORMAT!(),
@@ -938,8 +937,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     }
 
+
     println!("Flushing log file...");
     csv_writer.flush()?;
+
 
     // Attempt to shut off all outputs before exiting.
     // We reconnect to modbus to flush any cruft buffered at the WiFi bridge.
@@ -948,6 +949,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sleep(Duration::from_secs(2)).await;
     println!("Reconnecting to: '{socket_addr:?}' ...");
     ctx = tcp::connect(socket_addr).await?;
+
     zero_control_outputs(&mut ctx).await?;
     println!("Disconnecting again...");
     let foomp = ctx.disconnect().await;
