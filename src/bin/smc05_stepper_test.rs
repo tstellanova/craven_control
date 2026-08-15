@@ -106,6 +106,9 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     Ok(())
 }
 
+
+const DIPPER_PROGRESS_PERIOD_MS: i64 = 5000;
+
 async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context, 
     state: &mut StepperDriverState, current_utc_ms: i64)
     -> Result<(), Box<dyn std::error::Error>> 
@@ -114,30 +117,30 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
     const ACTION_PROCESS_MODE_DISTANCE_LOOP: u16 = 6;
 
     let (op_status, motion_direction, pulse_count, action_count) = read_smc05_motor_status(ctx).await?;
+    println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motion_direction, pulse_count, action_count);
 
-    if 0 == state.dipper_last_status_check_ms {
+    if state.dipper_last_status_check_ms == 0 {
+        println!("{} Fresh Dipper",current_utc_ms);
         // "Action process mode" -- running preprogrammed loop
         ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
         ctx.write_single_register(REG_SMC05_ACTION_PROCESS_MODE, ACTION_PROCESS_MODE_DISTANCE_LOOP).await??;
         state.dipper_prior_motion_direction = motion_direction;
         state.dipper_prior_action_count = action_count;
         state.dipper_prior_pulse_count = pulse_count;
-        state.dipper_last_status_check_ms = current_utc_ms;
     }
 
-    // only check for restart periodically
-    if current_utc_ms - state.dipper_last_status_check_ms > 2000 {
-        if action_count != state.dipper_prior_action_count {
-            println!("{} New Action started!",current_utc_ms);
-        }
+    // only check the status periodically, because there can be some pauses and delays between reversals and loops
+    if current_utc_ms - state.dipper_last_status_check_ms > DIPPER_PROGRESS_PERIOD_MS {
+        // if action_count != state.dipper_prior_action_count {
+        //     println!("{} New Action started!",current_utc_ms);
+        // }
         // If preprogrammed motion loop has finished, start it again:
         if op_status == 0 { // "Stopped"
             if motion_direction == state.dipper_prior_motion_direction  {
                 if pulse_count == state.dipper_prior_pulse_count {
                     // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
                     if action_count == state.dipper_prior_action_count {
-                        println!("{} Restart cycle", current_utc_ms);
-                        // ctx.write_single_register(REG_SMC05_OPERATION_MODE, START_STOP_OP_COMMAND).await?;
+                        println!("{} Next dip cycle", current_utc_ms);
                         start_smc05_action_loop(ctx).await?;
                     }
                 }
@@ -152,6 +155,9 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
 
     Ok(())
 }
+
+
+
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -178,21 +184,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         dipper_prior_action_count: 0, 
     };
 
-    // // let config_resp: Vec<u16> = ctx.read_holding_registers(0x0000, 24).await??;
-    // // println!("> config 0x000 (24):\r\n {:?}", config_resp);
-
-    
-    // // let status_rsp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_CUR_MOTOR_STATUS, 11).await??;
-    // // println!("> start status: {:?}", status_rsp);
-    // // let orig_motion_direction = status_rsp[1];
-    // // let orig_pulse_count = status_rsp[4];
-    // // let orig_action_count = status_rsp[8];
-
-    // let (_orig_op_status, orig_motion_direction, orig_pulse_count, orig_action_count) = read_smc05_motor_status(&mut ctx).await?;
-
-    // // "Action process mode" -- running preprogrammed loop
-    // ctx.write_single_register(REG_SMC05_ACTION_PROCESS_MODE, ACTION_PROCESS_MODE_DISTANCE_LOOP).await?;
-
     let start_time_ms = chrono::Utc::now().timestamp_millis();
 
     // "start" the preprogrammed motion loop (which is like 25 mm forward and back, multiple cycles)
@@ -203,7 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         manage_dipper_motion(&mut ctx, &mut driver_state, current_utc_ms).await?;
 
-        if (current_utc_ms - start_time_ms) > 30000 {
+        if (current_utc_ms - start_time_ms) > 60000 {
             continue_running = false;
         }
         else {

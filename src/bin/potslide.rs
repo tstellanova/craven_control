@@ -45,7 +45,7 @@ const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(CURRENT_SOURCE_
 const WARMUP_PHASE_DUR_MS: u64 = 30*1000; 
 
 /// Minimum time for automated Nucleation phase
-const NUCLEATION_DURATION_MS: u64 = 5*60*1000;
+const NUCLEATION_DURATION_MS: u64 = 15*60*1000;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -92,7 +92,7 @@ const MAX_ELONGATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_ELONGA
 const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
-const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = ELONGATION_CURRENT_DENSITY_AMPS_CM2/10.;
+const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = ELONGATION_CURRENT_DENSITY_AMPS_CM2/20.;
 const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 const NOM_NUCLEATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
 /// Maximum allowed current density during Nucleation phase
@@ -734,6 +734,7 @@ fn anode_connections_at_time_ms(phase_duration_ms: u64, state: &mut ElectrodeSta
 }
 
 
+const DIPPER_PROGRESS_PERIOD_MS: i64 = 4000;
 async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context, 
     state: &mut ElectrodeState, current_utc_ms: i64)
     -> Result<(), Box<dyn std::error::Error>> 
@@ -742,7 +743,7 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
     const ACTION_PROCESS_MODE_DISTANCE_LOOP: u16 = 6;
 
     let (op_status, motion_direction, pulse_count, action_count) = read_smc05_motor_status(ctx).await?;
-    //println!("op {} dir {} pulse {} action {}",op_status, motion_direction, pulse_count, action_count);
+    // println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motion_direction, pulse_count, action_count);
 
     if state.dipper_last_status_check_ms == 0 {
         println!("{} Fresh Dipper",current_utc_ms);
@@ -752,14 +753,15 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
         state.dipper_prior_motion_direction = motion_direction;
         state.dipper_prior_action_count = action_count;
         state.dipper_prior_pulse_count = pulse_count;
-        state.dipper_last_status_check_ms = current_utc_ms;
     }
 
     // only check the status periodically, because there can be some pauses and delays between reversals and loops
-    if current_utc_ms - state.dipper_last_status_check_ms > 2000 {
-        if action_count != state.dipper_prior_action_count {
-            println!("{} New Action started!",current_utc_ms);
-        }
+    if current_utc_ms - state.dipper_last_status_check_ms > DIPPER_PROGRESS_PERIOD_MS {
+        println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motion_direction, pulse_count, action_count);
+
+        // if action_count != state.dipper_prior_action_count {
+        //     println!("{} New Action started!",current_utc_ms);
+        // }
         // If preprogrammed motion loop has finished, start it again:
         if op_status == 0 { // "Stopped"
             if motion_direction == state.dipper_prior_motion_direction  {
@@ -781,6 +783,8 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
 
     Ok(())
 }
+
+
 /**
  * Entry point
  */
