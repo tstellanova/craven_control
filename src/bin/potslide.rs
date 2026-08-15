@@ -45,7 +45,7 @@ const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(CURRENT_SOURCE_
 const WARMUP_PHASE_DUR_MS: u64 = 30*1000; 
 
 /// Minimum time for automated Nucleation phase
-const NUCLEATION_DURATION_MS: u64 = 15*60*1000;
+const NUCLEATION_DURATION_MS: u64 = 10*60*1000;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -54,7 +54,7 @@ const PROBE_CHECK_TEMP_C:f32 = 550.;
 /// Temp we expect to see when probe is succesfully inserted into melt
 const PROBE_INSERTED_TEMP_C:f32 = 600.;
 /// The center temperature we are trying to achieve for the electrolyte melt
-const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
+const ELECTROLYTE_TARGET_TEMP_C:f32 = 760.;
 /// Below this temperature we don't drive start driving current through the electrodes.
 const MIN_ELECTRODE_CHECK_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C - 12.;
 /// The temperature at which the heater should cut in (turn on)
@@ -77,11 +77,6 @@ const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
 /// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
 // const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.0)*30.; // Approximate area of twisted pair of 1 mm diameter, about 30 mm long
 const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*30.; // Approximate area of rod of 2 mm diameter, about 30 mm long
-
-const WARMUP_CURRENT_DENSITY_AMPS_CM2:f32 = 0.001;
-const WARMUP_CURRENT_DENSITY_MA_MM2:f32 = (WARMUP_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
-const NOM_WARMUP_CURRENT_MA: f32 = (ELECTRODE_SURFACE_MM2 * WARMUP_CURRENT_DENSITY_MA_MM2).ceil();
-const MAX_WARMUP_CURRENT_MA:f32 = f32::min(MAX_DRIVE_CURRENT_MA,  NOM_WARMUP_CURRENT_MA);
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
 const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4; 
@@ -128,7 +123,7 @@ const HOLDING_PROBE_CURRENT_MA: f32 = 2. * MIN_DRIVE_CURRENT_INCR_MA;
 /// We only recognize current values reported by the current source above this threshold
 const REPORTED_CURRENT_THRESHOLD_MA: f32 = MIN_DRIVE_CURRENT_INCR_MA;
 /// Fixed Warmup phase current
-const WARMUP_CURRENT_MA: f32 =  MAX_WARMUP_CURRENT_MA;
+const WARMUP_CURRENT_MA: f32 =  4. * MIN_DRIVE_CURRENT_INCR_MA;
 /// Fall back to this current value during Elongation drive phase when resistance is unknown.
 const ELONGATION_PHASE_FALLBACK_MA: f32 = MID_ELONGATION_CURRENT_MA;
 
@@ -487,6 +482,7 @@ fn trans_nucleation_phase(state: &mut ElectrodeState, trans_utc_ms: i64)
     state.drive_phase = DrivePhase::Nucleation;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Nucleation as usize] = trans_utc_ms;
+    disable_dipper_monitor(state);
     println!("{} start Nucleation phase w/Rewma {:.2} min {:.2} max {:.2} Ohms", 
         trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
@@ -806,6 +802,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Furnace target {:.1} °C  cut-in {:.1} °C cut-out {:.1} °C excessive  {:.1} °C",
         ELECTROLYTE_TARGET_TEMP_C, CUT_IN_ABOVE_TARGET_TEMP_C, CUT_OUT_ABOVE_TARGET_TEMP_C, EXCESSIVE_HEAT_TEMP_C);
+    println!("Warmup {} mA ; Holding {} mA", WARMUP_CURRENT_MA, HOLDING_PROBE_CURRENT_MA);
     println!("Nucleate {} ms , {:.2} A/cm2, {:.2} mA max", 
         NUCLEATION_DURATION_MS, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
     println!("Elongate: {:.2} A/cm2, {:.2} mA max, Vmax {:.2}, Rot {:.2} ms, Term {:.1} Ω ", 
