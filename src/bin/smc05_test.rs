@@ -40,6 +40,7 @@ async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Context) -
 
     // Enable forward motion
     enable_sport_mode03(ctx).await?;
+    // TODO this apparently doesn't do anything? If the stepper was previously in REV mode, it'll continue to reverse?
     send_smc05_fwd_rotation_cmd(ctx).await?;
 
     loop {
@@ -55,12 +56,16 @@ async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Context) -
         else {
             let (op_status, motion_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
             println!("{} > op {} dir {} pulse {} action {}", cur_time_utc_ms, op_status, motion_direction, pulse_count, action_count);
+            if motion_direction == 1 { // in reverse??
+                send_smc05_fwd_rotation_cmd(ctx).await?;
+            }
 
             // Move some increment FWD / down into the crucible
             send_smc05_start_stop_cmd(ctx).await?;
             sleep(Duration::from_millis(500)).await;
             send_smc05_start_stop_cmd(ctx).await?;
         }
+        sleep(Duration::from_millis(1000)).await;
     }
     Ok(())
 }
