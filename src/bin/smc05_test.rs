@@ -38,22 +38,28 @@ async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Context) -
     let  anode_channels= [true; 4];
     write_wav_octo_relays(ctx, &anode_channels).await?;
 
-    set_smc05_sport_mode(ctx, 06);
+    // Enable forward motion
+    enable_sport_mode03(ctx).await?;
+    send_smc05_fwd_rotation_cmd(ctx).await?;
+
     loop {
         let (measured_volts, measured_ma, measured_ohms) = 
             drive_current_and_measure(ctx, DRIVE_CURRENT_MA).await?;
-        let cur_time_ms = chrono::Utc::now().timestamp_millis();
-        println!("{} {:.2} V {:.2} mA {:.2} Ohms", measured_volts, measured_ma, measured_ohms);
+        let cur_time_utc_ms = chrono::Utc::now().timestamp_millis();
+        println!("{} {:.2} V {:.2} mA {:.2} Ohms", cur_time_utc_ms, measured_volts, measured_ma, measured_ohms);
         if measured_ma > CHECK_CURRENT_MA {
+            // send_smc05_fwd_rotation_cmd(ctx).await?;
+            println!("touchdown!");
             break;
         }
         else {
             let (op_status, motion_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
-            println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motion_direction, pulse_count, action_count);
+            println!("{} > op {} dir {} pulse {} action {}", cur_time_utc_ms, op_status, motion_direction, pulse_count, action_count);
 
             // Move some increment FWD / down into the crucible
-            send_smc05_fwd_rotation_cmd(ctx).await?;
-            sleep(Duration::from_millis(1000)).await?;
+            send_smc05_start_stop_cmd(ctx).await?;
+            sleep(Duration::from_millis(500)).await;
+            send_smc05_start_stop_cmd(ctx).await?;
         }
     }
     Ok(())
@@ -77,25 +83,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
 
-    let mut driver_state = StepperDriverState::default();
+    // let mut driver_state = StepperDriverState::default();
 
-    let start_time_ms = chrono::Utc::now().timestamp_millis();
+    // let start_time_ms = chrono::Utc::now().timestamp_millis();
 
-    let mut continue_running = true;
-    while continue_running {
-        let current_utc_dt = chrono::Utc::now();
-        let current_utc_ms = current_utc_dt.timestamp_millis();
+    step_down_to_contact_surface(&mut ctx).await?;
 
-        dipper_cycle_check(&mut ctx, &mut driver_state, current_utc_ms).await?;
+    // let mut continue_running = true;
+    // while continue_running {
+    //     let current_utc_dt = chrono::Utc::now();
+    //     let current_utc_ms = current_utc_dt.timestamp_millis();
 
-        if (current_utc_ms - start_time_ms) > 60000 {
-            continue_running = false;
-        }
-        else {
-            // Arbitrary
-            sleep(Duration::from_millis(4000)).await;
-        }
-    }
+    //     dipper_cycle_check(&mut ctx, &mut driver_state, current_utc_ms).await?;
+
+    //     if (current_utc_ms - start_time_ms) > 60000 {
+    //         continue_running = false;
+    //     }
+    //     else {
+    //         // Arbitrary
+    //         sleep(Duration::from_millis(4000)).await;
+    //     }
+    // }
 
 
     ctx.disconnect().await?;

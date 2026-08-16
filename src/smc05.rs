@@ -180,8 +180,7 @@ pub async fn set_smc05_sport_mode(ctx: &mut tokio_modbus::client::Context,  mode
 }
 
 
-pub async fn enable_sport_mode03(ctx: &mut tokio_modbus::client::Context, 
-    state: &mut StepperDriverState)
+pub async fn enable_sport_mode03(ctx: &mut tokio_modbus::client::Context)
     -> Result<(), Box<dyn std::error::Error>> 
 {
     set_smc05_sport_mode(ctx, SMC05_SPORT_MODE_03_FWD_REV_RUNTIL).await
