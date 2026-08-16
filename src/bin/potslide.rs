@@ -20,6 +20,7 @@ use std::io::{BufWriter, Write};
 
 use approx::{abs_diff_ne};
 use craven_control::*;
+use craven_control::smc05::*;
 
 /// This dictates, on average, how often the main loop runs 
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
@@ -32,10 +33,6 @@ const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
 
 const MAINLOOP_DELAY: Duration = Duration::from_millis(100);
 
-/// minimum current stabilization time supported by the current source
-const CURRENT_SOURCE_STABILIZATION_MS: u64 = 25;
-/// time we allow the current to settle, after driving, before measuring
-const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(CURRENT_SOURCE_STABILIZATION_MS);
 
 // /// Empirically-derived average peak-to-peak interval for heating after warmup
 // const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 260;
@@ -66,8 +63,7 @@ const EXCESSIVE_HEAT_DELTA_C: f32 = 12.;
 /// Above this temperature the furnace heat is out of control
 const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + EXCESSIVE_HEAT_DELTA_C;
 
-/// Arbitrary value for "infinite" resistance (open circuit) between electrodes
-const INF_INTER_ELECTRODE_OHMS: f32 = 666.;
+
 /// Below this resistance value we terminate the Cyclic phase
 const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 0.5;
 
@@ -116,12 +112,10 @@ const NUM_ANODE_PAIRS:usize = 4;
 // const FULL_ANODE_CYCLE_DURATION_MS: usize  = NUM_ANODE_PAIRS * ANODE_ELONGATION_CONNECT_PERIOD_MS;
 
 
-/// The minimum increment for drive current, as specified in the current source docs
-const MIN_DRIVE_CURRENT_INCR_MA: f32 = 1.0;
+
 /// Used after we think we've achieved a robust carbon bridge 
 const HOLDING_PROBE_CURRENT_MA: f32 = 2. * MIN_DRIVE_CURRENT_INCR_MA;
-/// We only recognize current values reported by the current source above this threshold
-const REPORTED_CURRENT_THRESHOLD_MA: f32 = MIN_DRIVE_CURRENT_INCR_MA;
+
 /// Fixed Warmup phase current
 const WARMUP_CURRENT_MA: f32 =  4. * MIN_DRIVE_CURRENT_INCR_MA;
 /// Fall back to this current value during Elongation drive phase when resistance is unknown.
@@ -135,28 +129,6 @@ fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
     *ewma = alpha * new_value + (1.0 - alpha) * *ewma;
 }
 
-/// Read the dual thermocouple ADC
-async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
--> Result<(Option<f32>, Option<f32>), Box<dyn std::error::Error>> 
-{
-    read_ykktc1202_dual_tk_temps(ctx).await
-}
-
- /// Set the output drive current of the test electrodes 
-async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<(), Box<dyn std::error::Error>> 
-{
-    // set_ykpvccs0100_current_drive(ctx, milliamps).await
-    set_ykpvccs1000_current_drive(ctx, milliamps).await
-}
-
-/// Read the reported current from the current source
-async fn read_electrode_current_drive(ctx: &mut tokio_modbus::client::Context) -> Result<f32, Box<dyn std::error::Error>> 
-{
-    //read_ykpvccs0100_current_drive(ctx).await
-    read_ykpvccs1000_current_drive(ctx).await
-}
-
-
 /// 
 /// Verify that all the modules we expect to be connected to the RS-485 Modbus are,
 /// in fact, connected.
@@ -167,13 +139,7 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
     ping_one_modbus_node_id(ctx, NODEID_YKKTC1202_DUAL_TK, REG_NODEID_YKKTC1202_DUAL_TK).await?;
 
     // measures voltage and current across the electrodes
-    // TODO we can't ping WDCU3003M with a node ID read, because it doesn't expose node ID to Modbus
-    // ping_one_modbus_node_id(ctx, NODEID_WDCU3003_IV_ADC, 0x00).await?;
-
-
-    ctx.set_slave(Slave(NODEID_WDCU3003_IV_ADC));
-    let wdc3003_vals: Vec<u16> = ctx.read_holding_registers(0, 10).await??;
-    println!("wdc3003_vals: {:?}", wdc3003_vals);
+    ping_one_modbus_node_register(ctx, NODEID_WDCU3003_IV_ADC, 0, 1).await?;
 
     // supplies current to the cathode and anodes
     ping_one_modbus_node_id(ctx,NODEID_YKPVCCS010_CURR_SRC, REG_NODEID_YKPVCCS010_CURR_SRC).await?;
@@ -359,16 +325,9 @@ pub struct ElectrodeState {
     /// Whether a given anode is connected to the current supply 
     anode_connections: [bool; NUM_ANODE_PAIRS],
 
-    /// Whether or not the SMC05 dipper is enabled
-    dipper_enabled: bool, 
-    /// Last time the SMC05 driver status was checked
-    dipper_last_status_check_ms: i64,
-    /// The prior direction of the SMC05 dipper motion
-    dipper_prior_motion_direction: u16,
-    /// The prior SMC05 pulse count (which indicates distance traveled)
-    dipper_prior_pulse_count: u16,
-    /// The prior SMC05 action count (which indicates how many actions have run)
-    dipper_prior_action_count: u16,
+    // stepper motor controller state used for inserting/withdrawing (dipping) cathode
+    dipper_state: StepperDriverState,
+
 
     /// Timestamp when each phase started
     phase_starts_utc_ms: [i64; DrivePhase::Max as usize],
@@ -393,13 +352,13 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             measured_volts:0., 
             primary_anode_idx: 0,
             anode_connections: [false; NUM_ANODE_PAIRS],
-
-            dipper_enabled: false,
-            dipper_last_status_check_ms: 0,
-            dipper_prior_motion_direction: 0,
-            dipper_prior_pulse_count: 0,
-            dipper_prior_action_count: 0,
-
+            dipper_state: StepperDriverState {  // TODO replace with Default when const Default is stable
+                dipper_enabled: false, 
+                dipper_last_status_check_ms: 0, 
+                dipper_prior_motion_direction: 0, 
+                dipper_prior_pulse_count: 0, 
+                dipper_prior_action_count: 0 
+            },
             phase_starts_utc_ms: [0; DrivePhase::Max as usize],
         }; 
 
@@ -467,7 +426,7 @@ fn trans_warmup_phase(state: &mut ElectrodeState, trans_utc_ms: i64)
     state.drive_phase = DrivePhase::Warmup;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Warmup as usize] = trans_utc_ms;
-    disable_dipper_monitor(state);
+    disable_dipper_monitor(&mut state.dipper_state);
     println!("{} start Warmup phase", 
         trans_utc_ms, 
     );
@@ -481,7 +440,7 @@ fn trans_nucleation_phase(state: &mut ElectrodeState, trans_utc_ms: i64)
     state.drive_phase = DrivePhase::Nucleation;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Nucleation as usize] = trans_utc_ms;
-    disable_dipper_monitor(state);
+    disable_dipper_monitor(&mut state.dipper_state);
     println!("{} start Nucleation phase w/Rewma {:.2} min {:.2} max {:.2} Ohms", 
         trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
@@ -511,7 +470,7 @@ fn trans_holding_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_dura
     state.drive_phase = DrivePhase::Holding;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Holding as usize] = trans_utc_ms;
-    disable_dipper_monitor(state);
+    disable_dipper_monitor(&mut state.dipper_state);
     println!("{} start Holding phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
         trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
@@ -541,9 +500,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         if state.phase_start_ms <  after_drive_utc_ms {  (after_drive_utc_ms - state.phase_start_ms) as u64 } 
         else { 0 };
 
-    if state.dipper_enabled {
-        dipper_cycle_check(ctx, state, after_drive_utc_ms).await?;
-    }
+    dipper_cycle_check(ctx, &mut state.dipper_state, after_drive_utc_ms).await?;
+    
 
     // reuse old drive current until instructed otherwise
     let mut new_drive_ma: f32;
@@ -717,74 +675,6 @@ fn anode_connections_at_time_ms(phase_duration_ms: u64, state: &mut ElectrodeSta
     // println!("{} anodes mods {} conns {:?}", phase_duration_ms, cycle_modulo_ms, connections);
 }
 
-fn disable_dipper_monitor(state: &mut ElectrodeState) {
-    state.dipper_enabled = false;
-    state.dipper_last_status_check_ms = 0;
-    println!("Dipper monitor canceling...");
-}
-
-fn toggle_dipper_enabled(state: &mut ElectrodeState) {
-    let old_enabled = state.dipper_enabled ;
-    state.dipper_enabled = !old_enabled;
-    state.dipper_last_status_check_ms = 0;
-    println!("Toggled dipper_enabled {} -> {}", old_enabled, state.dipper_enabled);
-}
-
-/// How often should we check whether the dipper has finished its preprogrammed loop?
-const DIPPER_PROGRESS_PERIOD_MS: i64 = 4000;
-
-/// Monitor the dip cycle preprogrammed into the stepper controller.
-/// If the program has finished, restart it.
-async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context, 
-    state: &mut ElectrodeState, current_utc_ms: i64)
-    -> Result<(), Box<dyn std::error::Error>> 
-{
-    /// Action Mode that runs a distance cycle (by pulses) and then stops
-    const ACTION_PROCESS_MODE_DISTANCE_LOOP: u16 = 6;
-
-    let (op_status, motion_direction, pulse_count, action_count) = read_smc05_motor_status(ctx).await?;
-    // println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motion_direction, pulse_count, action_count);
-
-    if state.dipper_last_status_check_ms == 0 {
-        println!("{} Fresh Dipper",current_utc_ms);
-        // "Action process mode" -- running preprogrammed loop
-        ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
-        ctx.write_single_register(REG_SMC05_ACTION_PROCESS_MODE, ACTION_PROCESS_MODE_DISTANCE_LOOP).await??;
-        state.dipper_prior_motion_direction = motion_direction;
-        state.dipper_prior_action_count = action_count;
-        state.dipper_prior_pulse_count = pulse_count;
-    }
-
-    // only check the status periodically, because there can be some pauses and delays between reversals and loops
-    if current_utc_ms - state.dipper_last_status_check_ms > DIPPER_PROGRESS_PERIOD_MS {
-        println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motion_direction, pulse_count, action_count);
-
-        // if action_count != state.dipper_prior_action_count {
-        //     println!("{} New Action started!",current_utc_ms);
-        // }
-        // If preprogrammed motion loop has finished, start it again:
-        if op_status == 0 { // "Stopped"
-            if motion_direction == state.dipper_prior_motion_direction  {
-                if pulse_count == state.dipper_prior_pulse_count {
-                    // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
-                    if action_count == state.dipper_prior_action_count {
-                        println!("{} Next dip cycle", current_utc_ms);
-                        start_smc05_action_loop(ctx).await?;
-                    }
-                }
-            }
-        }
-
-        state.dipper_prior_motion_direction = motion_direction;
-        state.dipper_prior_action_count = action_count;
-        state.dipper_prior_pulse_count = pulse_count;
-        state.dipper_last_status_check_ms = current_utc_ms;
-    }
-
-    Ok(())
-}
-
-
 /**
  * Entry point
  */
@@ -876,7 +766,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 trans_holding_phase(&mut electrode_state,  current_utc_ms, 0);
                             }
                             "d" | "dip" => {
-                                toggle_dipper_enabled(&mut electrode_state);
+                                toggle_dipper_monitor(&mut electrode_state.dipper_state);
                             }
                             other => println!("Unknown command: {other:?}"),
                         }
@@ -927,7 +817,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let log_line = format!( CSV_LINE_FORMAT!(),
             current_utc_dt.timestamp_millis(),
             furnace_state.heater_on as u8,
-            electrode_state.dipper_enabled as u8,
+            electrode_state.dipper_state.dipper_enabled as u8,
             furnace_state.measured_temp_c,
             electrode_state.target_drive_ma, electrode_state.measured_ma,
             electrode_state.measured_volts, 

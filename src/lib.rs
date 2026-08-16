@@ -4,6 +4,8 @@ use tokio_modbus::prelude::*;
 use tokio::time::sleep;
 use std::{time::Duration};
 
+pub mod smc05;
+
 /// # Modbus node address assignments
 ///
 /// | Address | Description |
@@ -16,6 +18,8 @@ use std::{time::Duration};
 /// | 0x3F  | Dual Type-K Thermocouple Reader |
 /// | 0x4A  | 4-20mA current loop source |
 /// | 0x4F  | Pyrometer simulator (4-20mA source) |
+/// | 0x5F  | Octo relay control |
+/// | 0x6A  | Dipper stepper motor driver |
 /// 
 ///
 
@@ -62,15 +66,20 @@ pub const REG_R4DVI04_BAUD: u16 = 0x00FE; // get/set baud for RDVI04, 0-7, ...19
 pub const REG_YKPVCCS_DRIVE_MILLIAMPS: u16  = 0x10; // get/set drive mA for YK-PVCCS
 pub const REG_YKPVCCS_MONITOR_MILLIAMPS: u16  = 0x11; // read YK-PVCCS ammeter
 
-/// Register holding node ID (address) for SMC05
-pub const REG_NODEID_SMC05: u16 = 0x0018; 
-/// SMC05 action mode, such as stepping forward and back or running a preprogrammed action loop
-pub const REG_SMC05_ACTION_PROCESS_MODE: u16 = 0x0000; 
 
-/// SMC05 Current motor operating status: 0 stop, 1 acceleration, 2 deceleration , 3 uniform speed 
-pub const REG_SMC05_CUR_MOTOR_STATUS:u16  = 0x001A;
-/// SMC05 fwd/rev/start/stop operations
-pub const REG_SMC05_OPERATION_MODE: u16 = 0x0030; 
+/// minimum current stabilization time supported by the current source
+const CURRENT_SOURCE_STABILIZATION_MS: u64 = 25;
+/// time we allow the current to settle, after driving, before measuring
+const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(CURRENT_SOURCE_STABILIZATION_MS);
+
+/// The minimum increment for drive current, as specified in the current source docs
+const MIN_DRIVE_CURRENT_INCR_MA: f32 = 1.0;
+
+/// Arbitrary value for "infinite" resistance (open circuit) between electrodes
+const INF_INTER_ELECTRODE_OHMS: f32 = 666.;
+
+/// We only recognize current values reported by the current source above this threshold
+const REPORTED_CURRENT_THRESHOLD_MA: f32 = MIN_DRIVE_CURRENT_INCR_MA;
 
 /// Combine two u16 registers into an i32
 pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
@@ -80,9 +89,7 @@ pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {
     combined
 }
 
-/**
- * Ensure that we can connect with the given Modbus node ID.
- */
+/// Ensure that we can connect with the given Modbus node ID.
 pub async fn ping_one_modbus_node_id(ctx: &mut tokio_modbus::client::Context, node_id: u8,  reg_node_id: u16) 
     -> Result<(), Box<dyn std::error::Error>>
 {
@@ -105,6 +112,16 @@ pub async fn ping_one_modbus_node_id(ctx: &mut tokio_modbus::client::Context, no
     Ok(())
 }
 
+///
+/// Verify that a Modbus node is accessible by reading from register(s)
+/// 
+pub async fn ping_one_modbus_node_register(ctx: &mut tokio_modbus::client::Context, node_id: u8, register: u16, count: u16) 
+    -> Result<(), Box<dyn std::error::Error>>
+{
+    ctx.set_slave(Slave(node_id));
+    let _read_resp: Vec<u16> = ctx.read_holding_registers(register, count).await??;
+    Ok(())
+}
 
 ///
 /// Read the voltage and current at active electrode pair.
@@ -389,27 +406,97 @@ pub async fn write_wav_octo_relays(ctx: &mut tokio_modbus::client::Context, chan
     Ok(())
 }
 
-/// # Returns 
-/// (motion_direction, pulse_count, action_count) 
-pub async fn read_smc05_motor_status(ctx: &mut tokio_modbus::client::Context)
--> Result<(u16, u16, u16, u16), Box<dyn std::error::Error>> 
+
+/// Read the dual thermocouple ADC
+pub async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
+-> Result<(Option<f32>, Option<f32>), Box<dyn std::error::Error>> 
 {
-    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
-    let status_rsp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_CUR_MOTOR_STATUS, 9).await??;
-    // println!("> SMC05 status: {:?}", status_rsp);
-    let op_status = status_rsp[0];
-    let motion_direction = status_rsp[1];
-    let pulse_count = status_rsp[4];
-    let action_count = status_rsp[8];
-    Ok((op_status, motion_direction, pulse_count, action_count))
+    read_ykktc1202_dual_tk_temps(ctx).await
 }
 
-pub async fn start_smc05_action_loop(ctx: &mut tokio_modbus::client::Context) 
--> Result<(), Box<dyn std::error::Error>> 
+ /// Set the output drive current of the test electrodes 
+pub async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<(), Box<dyn std::error::Error>> 
 {
-    /// Tells the SMC05 to start (or stop) the preprogrammed loop
-    const START_STOP_OP_COMMAND: u16 = 3;
-    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
-    ctx.write_single_register(REG_SMC05_OPERATION_MODE, START_STOP_OP_COMMAND).await??;
-    Ok(())
+    // set_ykpvccs0100_current_drive(ctx, milliamps).await
+    set_ykpvccs1000_current_drive(ctx, milliamps).await
+}
+
+/// Read the reported current from the current source
+pub async fn read_electrode_current_drive(ctx: &mut tokio_modbus::client::Context) -> Result<f32, Box<dyn std::error::Error>> 
+{
+    //read_ykpvccs0100_current_drive(ctx).await
+    read_ykpvccs1000_current_drive(ctx).await
+}
+
+// pub async fn read_stable_electrode_iv(ctx: &mut tokio_modbus::client::Context) 
+// -> Result<(f32, f32, f32), Box<dyn std::error::Error>> 
+// {
+//     const NUM_IV_READ_STEPS: i32 = 3;
+//     const AVG_IV_FACTOR: f32 = NUM_IV_READ_STEPS as f32;
+
+//     let mut total_volts = 0.;
+//     let mut total_milliamps = 0.;
+
+
+//     for _i in 0..NUM_IV_READ_STEPS {
+//         let (step_volts, step_milliamps) = read_wdcu3003_iv_adc(ctx).await?;
+//         total_volts += step_volts;
+//         total_milliamps += step_milliamps;
+//         sleep(CURRENT_SOURCE_STABILIZATION_MS).await;
+//     }
+//     Ok
+// }
+
+/// Set drive current on electrode and measure output
+/// # Returns
+/// (measured_volts, measured_milliamps, measured_ohms)
+pub async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
+    target_drive_ma: f32, 
+) 
+-> Result<(f32, f32, f32), Box<dyn std::error::Error>> 
+{
+    // Drive output current pulse based on prior settings, and measure result
+    set_electrode_current_drive(ctx, target_drive_ma).await?;
+    sleep(CURRENT_SOURCE_WAIT_TIME).await;
+    let reported_drive_ma = read_electrode_current_drive(ctx).await?;
+
+    // Measure the average resulting induced current and potential across the electrodes
+    let mut total_volts = 0.;
+    let mut total_milliamps = 0.;
+    const NUM_IV_READ_STEPS: i32 = 3;
+    const AVG_IV_FACTOR: f32 = NUM_IV_READ_STEPS as f32;
+
+    for _i in 0..NUM_IV_READ_STEPS {
+        let (step_volts, step_milliamps) = read_wdcu3003_iv_adc(ctx).await?;
+        total_volts += step_volts;
+        total_milliamps += step_milliamps;
+        sleep(CURRENT_SOURCE_WAIT_TIME).await;
+    }
+    // average multiple potential samples
+    let measured_volts = total_volts / AVG_IV_FACTOR;
+    // average multiple current samples
+    let mut measured_milliamps: f32 = 
+        if target_drive_ma > 0.  && reported_drive_ma > REPORTED_CURRENT_THRESHOLD_MA  
+        {  total_milliamps / AVG_IV_FACTOR }  
+        else { 0. };
+
+    // sanity check that measured current is close to (current source reported) drive current
+    if reported_drive_ma > 2.*MIN_DRIVE_CURRENT_INCR_MA {
+        let mr_current_gap_frac = (reported_drive_ma - measured_milliamps)/reported_drive_ma;
+        if mr_current_gap_frac > 0.05 {
+            println!("mr_current_gap : {:.3}", mr_current_gap_frac);
+            measured_milliamps = reported_drive_ma;
+        }
+    }
+
+    let measured_ohms = 
+        if measured_milliamps > 0. {
+            // this also covers the case where volts = 0.0, i.e. zero resistance.
+            (1000. * measured_volts) / measured_milliamps 
+        }
+        else {
+            INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
+        };
+
+    return Ok((measured_volts, measured_milliamps, measured_ohms))
 }
