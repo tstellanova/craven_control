@@ -468,7 +468,6 @@ fn trans_warmup_phase(state: &mut ElectrodeState, trans_utc_ms: i64)
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Warmup as usize] = trans_utc_ms;
     disable_dipper_monitor(state);
-
     println!("{} start Warmup phase", 
         trans_utc_ms, 
     );
@@ -521,18 +520,7 @@ fn trans_holding_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_dura
     HOLDING_PROBE_CURRENT_MA
 }
 
-fn disable_dipper_monitor(state: &mut ElectrodeState) {
-    state.dipper_enabled = false;
-    state.dipper_last_status_check_ms = 0;
-    println!("Dipper monitor canceling...");
-}
 
-fn toggle_dipper_enabled(state: &mut ElectrodeState) {
-    let old_enabled = state.dipper_enabled ;
-    state.dipper_enabled = !old_enabled;
-    state.dipper_last_status_check_ms = 0;
-    println!("Toggled dipper_enabled {} -> {}", old_enabled, state.dipper_enabled);
-}
 
 /// 
 /// Adjust the electrode current based on melt condition and drive phase
@@ -729,8 +717,22 @@ fn anode_connections_at_time_ms(phase_duration_ms: u64, state: &mut ElectrodeSta
     // println!("{} anodes mods {} conns {:?}", phase_duration_ms, cycle_modulo_ms, connections);
 }
 
+fn disable_dipper_monitor(state: &mut ElectrodeState) {
+    state.dipper_enabled = false;
+    state.dipper_last_status_check_ms = 0;
+    println!("Dipper monitor canceling...");
+}
 
+fn toggle_dipper_enabled(state: &mut ElectrodeState) {
+    let old_enabled = state.dipper_enabled ;
+    state.dipper_enabled = !old_enabled;
+    state.dipper_last_status_check_ms = 0;
+    println!("Toggled dipper_enabled {} -> {}", old_enabled, state.dipper_enabled);
+}
+
+/// How often should we check whether the dipper has finished its preprogrammed loop?
 const DIPPER_PROGRESS_PERIOD_MS: i64 = 4000;
+
 async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context, 
     state: &mut ElectrodeState, current_utc_ms: i64)
     -> Result<(), Box<dyn std::error::Error>> 
