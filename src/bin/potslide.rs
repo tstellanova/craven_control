@@ -542,7 +542,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         else { 0 };
 
     if state.dipper_enabled {
-        manage_dipper_motion(ctx, state, after_drive_utc_ms).await?;
+        dipper_cycle_check(ctx, state, after_drive_utc_ms).await?;
     }
 
     // reuse old drive current until instructed otherwise
@@ -733,7 +733,9 @@ fn toggle_dipper_enabled(state: &mut ElectrodeState) {
 /// How often should we check whether the dipper has finished its preprogrammed loop?
 const DIPPER_PROGRESS_PERIOD_MS: i64 = 4000;
 
-async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context, 
+/// Monitor the dip cycle preprogrammed into the stepper controller.
+/// If the program has finished, restart it.
+async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context, 
     state: &mut ElectrodeState, current_utc_ms: i64)
     -> Result<(), Box<dyn std::error::Error>> 
 {

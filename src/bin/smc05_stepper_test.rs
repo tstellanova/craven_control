@@ -16,6 +16,8 @@ const START_STOP_OP_COMMAND: u16 = 3;
 
 #[derive(Debug, Clone)]
 pub struct StepperDriverState {
+    /// Whether or not the SMC05 dipper is enabled
+    dipper_enabled: bool, 
     /// Last time the driver status was checked
     dipper_last_status_check_ms: i64,
     /// The prior direction of the SMC05 dipper motion
@@ -82,23 +84,14 @@ async fn stop_motion(ctx: &mut tokio_modbus::client::Context)
 /// 
 async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
 {
-    // measures dual type-K thermocouples
-    ping_one_modbus_node_id(ctx, NODEID_YKKTC1202_DUAL_TK, REG_NODEID_YKKTC1202_DUAL_TK).await?;
-
     // measures voltage and current across the electrodes
     // TODO we can't ping WDCU3003M with a node ID read, because it doesn't expose node ID to Modbus
-    // ping_one_modbus_node_id(ctx, NODEID_WDCU3003_IV_ADC, 0x00).await?;
-
     ctx.set_slave(Slave(NODEID_WDCU3003_IV_ADC));
     let wdc3003_vals: Vec<u16> = ctx.read_holding_registers(0, 10).await??;
     println!("wdc3003_vals: {:?}", wdc3003_vals);
 
     // supplies current to the cathode and anodes
     ping_one_modbus_node_id(ctx,NODEID_YKPVCCS010_CURR_SRC, REG_NODEID_YKPVCCS010_CURR_SRC).await?;
-
-    // controls furnace on/off
-    // controls 4-pair anode connection relays
-    ping_one_modbus_node_id(ctx, NODEID_WAV_OCTO_RELAY, REG_NODEID_WAVESHARE_V2).await?;
 
     // controls dipping motion of cathode
     ping_one_modbus_node_id(ctx, NODEID_SMC05_STEP_DRIVER, REG_NODEID_SMC05).await?;
@@ -107,9 +100,26 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
 }
 
 
+
+fn disable_dipper_monitor(state: &mut StepperDriverState) {
+    state.dipper_enabled = false;
+    state.dipper_last_status_check_ms = 0;
+    println!("Dipper monitor canceling...");
+}
+
+fn toggle_dipper_enabled(state: &mut StepperDriverState) {
+    let old_enabled = state.dipper_enabled ;
+    state.dipper_enabled = !old_enabled;
+    state.dipper_last_status_check_ms = 0;
+    println!("Toggled dipper_enabled {} -> {}", old_enabled, state.dipper_enabled);
+}
+
+/// How often should we check whether the dipper has finished its preprogrammed loop?
 const DIPPER_PROGRESS_PERIOD_MS: i64 = 5000;
 
-async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context, 
+/// Monitor the dip cycle preprogrammed into the stepper controller.
+/// If the program has finished, restart it.
+async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context, 
     state: &mut StepperDriverState, current_utc_ms: i64)
     -> Result<(), Box<dyn std::error::Error>> 
 {
@@ -117,7 +127,7 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
     const ACTION_PROCESS_MODE_DISTANCE_LOOP: u16 = 6;
 
     let (op_status, motion_direction, pulse_count, action_count) = read_smc05_motor_status(ctx).await?;
-    println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motion_direction, pulse_count, action_count);
+    // println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motion_direction, pulse_count, action_count);
 
     if state.dipper_last_status_check_ms == 0 {
         println!("{} Fresh Dipper",current_utc_ms);
@@ -130,7 +140,9 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
     }
 
     // only check the status periodically, because there can be some pauses and delays between reversals and loops
-    if current_utc_ms - state.dipper_last_status_check_ms > DIPPER_PROGRESS_PERIOD_MS {
+    if (current_utc_ms - state.dipper_last_status_check_ms) > DIPPER_PROGRESS_PERIOD_MS {
+        println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motion_direction, pulse_count, action_count);
+
         // if action_count != state.dipper_prior_action_count {
         //     println!("{} New Action started!",current_utc_ms);
         // }
@@ -158,7 +170,6 @@ async fn manage_dipper_motion(ctx: &mut tokio_modbus::client::Context,
 
 
 
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
@@ -178,6 +189,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sleep(Duration::from_millis(50)).await;
 
     let mut driver_state: StepperDriverState = StepperDriverState { 
+        dipper_enabled: false,
         dipper_last_status_check_ms: 0, 
         dipper_prior_motion_direction: 0, 
         dipper_prior_pulse_count: 0, 
@@ -192,7 +204,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let current_utc_dt = chrono::Utc::now();
         let current_utc_ms = current_utc_dt.timestamp_millis();
 
-        manage_dipper_motion(&mut ctx, &mut driver_state, current_utc_ms).await?;
+        if driver_state.dipper_enabled {
+            dipper_cycle_check(&mut ctx, &mut driver_state, current_utc_ms).await?;
+        }
 
         if (current_utc_ms - start_time_ms) > 60000 {
             continue_running = false;
