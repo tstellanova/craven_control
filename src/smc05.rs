@@ -141,6 +141,71 @@ pub async fn send_smc05_fwd_rotation_cmd(ctx: &mut tokio_modbus::client::Context
     send_smc05_serial_op_cmd(ctx, ROTATION_DIR_FWD_CMD).await
 }
 
+pub async fn report_smc05_motor_status(ctx: &mut tokio_modbus::client::Context) 
+-> Result<(u16, u16), Box<dyn std::error::Error>>
+{
+    let (op_status, motion_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
+    println!("{} > op {} dir {} pulse {} action {}", 
+        chrono::Utc::now().timestamp_millis(), op_status, motion_direction, pulse_count, action_count);
+    Ok((op_status, motion_direction))
+}
+
+const SMC05_ACCEL_TIME_MS: u64 = 1000;
+
+pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context) 
+-> Result<(), Box<dyn std::error::Error>>
+{
+    let (_op_status, motion_direction) = report_smc05_motor_status(ctx).await?;
+    if motion_direction != 0 {
+        println!("FLIP -> Fwd");
+        send_smc05_rev_rotation_cmd(ctx).await?;
+        sleep(Duration::from_millis(SMC05_ACCEL_TIME_MS)).await;
+    }
+    
+    let (op_status, motion_direction) = report_smc05_motor_status(ctx).await?;
+    if op_status == 0 { //still stopped?
+        println!("START Fwd {} ", motion_direction);
+        send_smc05_start_stop_cmd(ctx).await?;
+    }
+
+    report_smc05_motor_status(ctx).await?;
+    Ok(())
+}
+
+pub async fn start_smc05_rev_rotation(ctx: &mut tokio_modbus::client::Context) 
+-> Result<(), Box<dyn std::error::Error>>
+{
+    let (_op_status, motion_direction) = report_smc05_motor_status(ctx).await?;
+    if motion_direction != 1 {
+        println!("FLIP -> Rev");
+        send_smc05_fwd_rotation_cmd(ctx).await?;
+        sleep(Duration::from_millis(SMC05_ACCEL_TIME_MS)).await;
+    }
+    
+    let (op_status, motion_direction) = report_smc05_motor_status(ctx).await?;
+    if op_status == 0 { //still stopped?
+        println!("START Rev {}", motion_direction);
+        send_smc05_start_stop_cmd(ctx).await?;
+    }
+
+    report_smc05_motor_status(ctx).await?;
+    Ok(())
+}
+
+pub async fn stop_smc05_rotation(ctx: &mut tokio_modbus::client::Context) 
+-> Result<(), Box<dyn std::error::Error>>
+{
+    loop {
+        let (op_status, _motion_direction) = report_smc05_motor_status(ctx).await?; 
+        if 0 != op_status {
+            println!("STOP");
+            send_smc05_start_stop_cmd(ctx).await?;
+            sleep(Duration::from_millis(SMC05_ACCEL_TIME_MS)).await;
+        }
+        else { break };
+    }
+    Ok(())
+}
 pub async fn send_smc05_rev_rotation_cmd(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
