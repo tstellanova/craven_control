@@ -27,6 +27,7 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
 }
 
 
+/// 
 /// This function steps the cathode down until it makes solid contact with electrolyte
 ///
 pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
@@ -34,39 +35,39 @@ pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Contex
     const DRIVE_CURRENT_MA: f32 = 4.;
     const CHECK_CURRENT_MA: f32 = DRIVE_CURRENT_MA - 0.25;
 
-    // Enable all of the anode connections
-    let  anode_channels= [true; 4];
+    // Enable specific anode connections
+    let  anode_channels= [false, false, false, true];
     write_wav_octo_relays(ctx, &anode_channels).await?;
 
-    // Enable forward motion
+    report_system_config(ctx).await?;
+    set_fwd_speed(ctx, 120.).await?;
+    set_rev_speed(ctx, 120.).await?;
     enable_sport_mode03(ctx).await?;
-    // TODO this apparently doesn't do anything? If the stepper was previously in REV mode, it'll continue to reverse?
-    send_smc05_fwd_rotation_cmd(ctx).await?;
+    report_system_config(ctx).await?;
+
+    // Enable forward motion
+    start_smc05_fwd_rotation(ctx).await?;
 
     loop {
         let (measured_volts, measured_ma, measured_ohms) = 
             drive_current_and_measure(ctx, DRIVE_CURRENT_MA).await?;
         let cur_time_utc_ms = chrono::Utc::now().timestamp_millis();
-        println!("{} {:.2} V {:.2} mA {:.2} Ohms", cur_time_utc_ms, measured_volts, measured_ma, measured_ohms);
+        if measured_ma > 0. {
+            println!("{} {:.2} V {:.2} mA {:.2} Ohms", cur_time_utc_ms, measured_volts, measured_ma, measured_ohms);
+        }
         if measured_ma > CHECK_CURRENT_MA {
             // send_smc05_fwd_rotation_cmd(ctx).await?;
             println!("touchdown!");
             break;
         }
         else {
-            let (op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
-            println!("{} > op {} dir {} pulse {} action {}", cur_time_utc_ms, op_status, motor_direction, pulse_count, action_count);
-            if motor_direction == 1 { // in reverse??
-                send_smc05_fwd_rotation_cmd(ctx).await?;
-            }
-
             // Move some increment FWD / down into the crucible
-            send_smc05_start_stop_cmd(ctx).await?;
-            sleep(Duration::from_millis(500)).await;
-            send_smc05_start_stop_cmd(ctx).await?;
+            sleep(Duration::from_millis(1000)).await;
         }
-        sleep(Duration::from_millis(1000)).await;
     }
+
+    stop_smc05_rotation(ctx).await?;
+
     Ok(())
 }
 
@@ -111,31 +112,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut ctx: client::Context = tcp::connect(socket_addr).await?;
     enumerate_required_modules(&mut ctx).await?;
 
-    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
-
-    // let mut driver_state = StepperDriverState::default();
-
-    // let start_time_ms = chrono::Utc::now().timestamp_millis();
-
-    // step_down_to_contact_surface(&mut ctx).await?;
-    sport_modes_test(&mut ctx).await?;
-
-    // let mut continue_running = true;
-    // while continue_running {
-    //     let current_utc_dt = chrono::Utc::now();
-    //     let current_utc_ms = current_utc_dt.timestamp_millis();
-
-    //     dipper_cycle_check(&mut ctx, &mut driver_state, current_utc_ms).await?;
-
-    //     if (current_utc_ms - start_time_ms) > 60000 {
-    //         continue_running = false;
-    //     }
-    //     else {
-    //         // Arbitrary
-    //         sleep(Duration::from_millis(4000)).await;
-    //     }
-    // }
-
+    let start_time_ms = chrono::Utc::now().timestamp_millis();
+    // sport_modes_test(&mut ctx).await?;
+    step_down_to_contact_surface(&mut ctx).await?;
+    let duration =  chrono::Utc::now().timestamp_millis() - start_time_ms;
+    println!("Finished in {} ms", duration);
 
     ctx.disconnect().await?;
 

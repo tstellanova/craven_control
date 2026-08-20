@@ -7,6 +7,12 @@ pub const REG_NODEID_SMC05: u16 = 0x0018;
 /// SMC05 action mode, such as stepping forward and back or running a preprogrammed action loop
 pub const REG_SMC05_SPORT_MODE: u16 = 0x0000; 
 
+/// SMC05 forward rotation speed (Rotations Per Minute)
+pub const REG_SMC05_FWD_RPM: u16 = 0x0003;
+
+/// SMC05 reverse rotation speed (Rotations Per Minute)
+pub const REG_SMC05_REV_RPM: u16 = 0x0006;
+
 /// SMC05 Current motor operating status: 0 stop, 1 acceleration, 2 deceleration , 3 uniform speed 
 pub const REG_SMC05_CUR_MOTOR_STATUS:u16  = 0x001A;
 /// SMC05 fwd/rev/start/stop operations
@@ -59,53 +65,7 @@ impl Default for StepperDriverState {
     }
 }
 
-// async fn start_motion(ctx: &mut tokio_modbus::client::Context, motion: u16) 
-// -> Result<(), Box<dyn std::error::Error>> 
-// {
-//     println!("start motion: {}", motion);
-//     ctx.write_single_register(REG_SMC05_OPERATION_MODE, motion).await?;
-//     sleep(Duration::from_millis(25)).await;
-//     let status_resp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_CUR_MOTOR_STATUS, 5).await??;
-//     println!("> start status 0x1A: {:?}", status_resp);
-//     let opstatus = status_resp[0];
-//     let direction = status_resp[1];
-//     if opstatus == 0  {
-//         println!("0x0030 -> {} start ", motion);
-//         ctx.write_single_register(REG_SMC05_OPERATION_MODE, START_STOP_OP_COMMAND).await?;
-//     }
 
-//     Ok(())
-// }
-
-// async fn start_forward(ctx: &mut tokio_modbus::client::Context) 
-// -> Result<(), Box<dyn std::error::Error>> 
-
-// {
-//     stop_motion(ctx).await;
-//     start_motion(ctx,0).await
-// }
-
-// async fn start_reverse(ctx: &mut tokio_modbus::client::Context) 
-// -> Result<(), Box<dyn std::error::Error>> 
-// {
-//     stop_motion(ctx).await;
-//     start_motion(ctx,1).await
-// }
-
-// async fn stop_motion(ctx: &mut tokio_modbus::client::Context) 
-// -> Result<(), Box<dyn std::error::Error>> 
-
-// {
-//     let status_resp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_CUR_MOTOR_STATUS, 5).await??;
-//     println!("> stop status 0x1A: {:?}", status_resp);
-//     let opstatus = status_resp[0];
-//     let direction = status_resp[1];
-//     if opstatus != 0 {
-//         println!("0x0030 -> 3 stop_motion ");
-//         ctx.write_single_register(REG_SMC05_OPERATION_MODE, START_STOP_OP_COMMAND).await?;
-//     }
-//     Ok(())
-// }
 
 /// # Returns 
 /// (motion_direction, pulse_count, action_count) 
@@ -138,8 +98,9 @@ pub async fn report_smc05_motor_status(ctx: &mut tokio_modbus::client::Context)
 }
 
 const SMC05_ACCEL_TIME_MS: u64 = 1000;
-const SMC05_ROTATION_DIR_FWD: u16 = 0;
-const SMC05_ROTATION_DIR_REV: u16 = 1;
+
+pub const SMC05_ROTATION_DIR_FWD: u16 = 0;
+pub const SMC05_ROTATION_DIR_REV: u16 = 1;
 
 pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>>
@@ -239,14 +200,42 @@ pub fn toggle_dipper_monitor(state: &mut StepperDriverState) {
     println!("Toggled dipper_enabled {} -> {}", old_enabled, state.dipper_enabled);
 }
 
+
+/// 
+pub async fn report_system_config(ctx: &mut tokio_modbus::client::Context)
+    -> Result<(), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+    let status_resp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_SPORT_MODE, 12).await??;
+    println!("sysconfig: {:?}", status_resp);
+    Ok(())
+}
+
+pub async fn set_fwd_speed(ctx: &mut tokio_modbus::client::Context, rpm: f32)
+    -> Result<(), Box<dyn std::error::Error>> 
+{
+    let fxp_rpm: u16 = (10. * rpm).round() as u16;
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+    ctx.write_single_register(REG_SMC05_FWD_RPM, fxp_rpm).await??;
+    Ok(())
+}
+
+pub async fn set_rev_speed(ctx: &mut tokio_modbus::client::Context, rpm: f32)
+    -> Result<(), Box<dyn std::error::Error>> 
+{
+    let fxp_rpm = (10. * rpm).round() as u16;
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+    ctx.write_single_register(REG_SMC05_REV_RPM, fxp_rpm).await??;
+    Ok(())
+}
+
 ///
 /// Set the sport mode of the SMC05 stepper driver
 /// 
 pub async fn set_smc05_sport_mode(ctx: &mut tokio_modbus::client::Context,  mode: u16)
     -> Result<(), Box<dyn std::error::Error>> 
 {
-    println!("Set Sport Mode {}...", mode);
-
+    println!("Set SMC05 Sport Mode {}...", mode);
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
     ctx.write_single_register(REG_SMC05_SPORT_MODE, mode).await??;
     Ok(())
