@@ -37,8 +37,6 @@ const ROTATION_DIR_REV_CMD: u16 = 2;
 // 03 - stop / start
 
 
-/// How often should we check whether the dipper has finished its preprogrammed loop?
-const SPORT_MODE06_PROGRESS_PERIOD_MS: i64 = 5000;
 
 #[derive(Debug, Clone)]
 pub struct StepperDriverState {
@@ -52,6 +50,8 @@ pub struct StepperDriverState {
     pub dipper_prior_pulse_count: u16,
     /// The prior SMC05 action count (which indicates how many actions have run)
     pub dipper_prior_action_count: u16,
+    /// The time at which the cathode made contact with the surface
+    pub surface_contact_start_ms: i64,
 }
 
 impl Default for StepperDriverState {
@@ -61,6 +61,7 @@ impl Default for StepperDriverState {
             dipper_prior_motion_direction: 0, 
             dipper_prior_pulse_count: 0, 
             dipper_prior_action_count: 0, 
+            surface_contact_start_ms: 0,
         }
     }
 }
@@ -92,12 +93,12 @@ pub async fn report_smc05_motor_status(ctx: &mut tokio_modbus::client::Context)
 -> Result<(u16, u16), Box<dyn std::error::Error>>
 {
     let (op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
-    println!("{} > op {} dir {} pulse {} action {}", 
+    println!("{} SMC05 > op {} dir {} pulse {} action {}", 
         chrono::Utc::now().timestamp_millis(), op_status, motor_direction, pulse_count, action_count);
     Ok((op_status, motor_direction))
 }
 
-const SMC05_ACCEL_TIME_MS: u64 = 1000;
+const SMC05_CHECK_ACCEL_TIME_MS: u64 = 250;
 
 pub const SMC05_ROTATION_DIR_FWD: u16 = 0;
 pub const SMC05_ROTATION_DIR_REV: u16 = 1;
@@ -109,40 +110,34 @@ pub const SMC05_PULLBACK_RATE_RPM: f32 = 3.;
 pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>>
 {
-    let (_op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
+    let (op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
     if motor_direction != SMC05_ROTATION_DIR_FWD {
         println!("FLIP -> Fwd");
         send_smc05_fwd_rotation_cmd(ctx).await?;
-        sleep(Duration::from_millis(SMC05_ACCEL_TIME_MS)).await;
+        // sleep(Duration::from_millis(SMC05_CHECK_ACCEL_TIME_MS)).await;
     }
-    
-    let (op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
-    if op_status == 0 { //still stopped?
-        println!("START Fwd {} ", motor_direction);
+    else if op_status == 0 { //still stopped?
+        println!("restart Fwd ");
         send_smc05_start_stop_cmd(ctx).await?;
     }
 
-    report_smc05_motor_status(ctx).await?;
     Ok(())
 }
 
 pub async fn start_smc05_rev_rotation(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>>
 {
-    let (_op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
+    let (op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
     if motor_direction != SMC05_ROTATION_DIR_REV {
         println!("FLIP -> Rev");
         send_smc05_rev_rotation_cmd(ctx).await?;
-        sleep(Duration::from_millis(SMC05_ACCEL_TIME_MS)).await;
+        // sleep(Duration::from_millis(SMC05_CHECK_ACCEL_TIME_MS)).await;
     }
-    
-    let (op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
-    if op_status == 0 { //still stopped?
-        println!("START Rev {}", motor_direction);
+    else if op_status == 0 { //stopped
+        println!("restart Rev");
         send_smc05_start_stop_cmd(ctx).await?;
     }
 
-    report_smc05_motor_status(ctx).await?;
     Ok(())
 }
 
@@ -154,7 +149,7 @@ pub async fn stop_smc05_rotation(ctx: &mut tokio_modbus::client::Context)
         if 0 != op_status {
             println!("STOP dir {}", motion_direction);
             send_smc05_start_stop_cmd(ctx).await?;
-            sleep(Duration::from_millis(500)).await;
+            sleep(Duration::from_millis(SMC05_CHECK_ACCEL_TIME_MS)).await;
         }
         else { break };
     }
@@ -205,8 +200,59 @@ pub fn toggle_dipper_monitor(state: &mut StepperDriverState) {
 }
 
 
+pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    enable_sport_mode03(ctx).await?;
+
+    // back off the probe a bit, first
+    set_rev_speed(ctx, SMC05_MEDIUM_MOVE_RATE_RPM).await?;
+    start_smc05_rev_rotation(ctx).await?;
+    sleep(Duration::from_millis(3000)).await;
+    stop_smc05_rotation(ctx).await?;
+
+    // configure for surface contact probing
+    report_smc05_system_config(ctx).await?;
+    set_fwd_speed(ctx, SMC05_PROBE_DESCENT_RATE_RPM).await?;
+    set_rev_speed(ctx, SMC05_PULLBACK_RATE_RPM).await?;
+    report_smc05_system_config(ctx).await?;
+
+    Ok(())
+}
+
+pub async fn surface_contact_monitor(ctx: &mut tokio_modbus::client::Context, cur_time_utc_ms: i64, state: &mut StepperDriverState, measured_ma: f32) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    const CHECK_CURRENT_MA: f32 = 3.75;
+
+    if measured_ma > CHECK_CURRENT_MA {
+        if state.surface_contact_start_ms == 0 {
+            println!("{} Dipper touchdown!", cur_time_utc_ms);
+            stop_smc05_rotation(ctx).await?;
+            state.surface_contact_start_ms = cur_time_utc_ms;
+        }
+        else {
+            // start very slowly pulling the cathode out of the electrolyte
+            start_smc05_rev_rotation(ctx).await?;
+        }
+    }
+    else {
+        // not in contact
+        if state.surface_contact_start_ms != 0 {
+            println!("{} Dipper lost contact!", cur_time_utc_ms);
+            state.surface_contact_start_ms = 0;
+        }
+        // Move some increment FWD / down into the crucible
+        start_smc05_fwd_rotation(ctx).await?;
+    }
+    state.dipper_last_status_check_ms = cur_time_utc_ms;
+
+    Ok(())
+}
+
+
 /// 
-pub async fn report_system_config(ctx: &mut tokio_modbus::client::Context)
+pub async fn report_smc05_system_config(ctx: &mut tokio_modbus::client::Context)
     -> Result<(), Box<dyn std::error::Error>> 
 {
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
@@ -268,45 +314,64 @@ pub async fn enable_sport_mode06(ctx: &mut tokio_modbus::client::Context,
 }
 
 
-/// Monitor the dip cycle preprogrammed into the stepper controller.
-/// If the program has finished, restart it.
-/// Note that state.dipper_enabled must be enabled, else this fn does nothing.
+/// 
+/// Monitor the cathode dipping into the electrolyte.
+/// 
 pub async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context, 
-    state: &mut StepperDriverState, current_utc_ms: i64)
+    state: &mut StepperDriverState, current_utc_ms: i64, measured_ma: f32)
     -> Result<(), Box<dyn std::error::Error>> 
 {
     if !state.dipper_enabled {return Ok(()) };
 
     if state.dipper_last_status_check_ms == 0 {
         println!("{} Fresh Dipper",current_utc_ms);
-        enable_sport_mode06(ctx,state).await?;
+        setup_cathode_surface_probe(ctx).await?;
     }
 
     // only check the status periodically, because there can be some pauses and delays between reversals and loops
-    if (current_utc_ms - state.dipper_last_status_check_ms) > SPORT_MODE06_PROGRESS_PERIOD_MS {
-        let (op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
-        println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motor_direction, pulse_count, action_count);
-
-        // If preprogrammed motion loop has finished, start it again:
-        if op_status == 0 { // "Stopped"
-            if motor_direction == state.dipper_prior_motion_direction  {
-                if pulse_count == state.dipper_prior_pulse_count {
-                    // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
-                    if action_count == state.dipper_prior_action_count {
-                        println!("{} Next dip cycle", current_utc_ms);
-                        start_sport_mode06_sequence(ctx).await?;
-                    }
-                }
-            }
-        }
-
-        state.dipper_prior_motion_direction = motor_direction;
-        state.dipper_prior_action_count = action_count;
-        state.dipper_prior_pulse_count = pulse_count;
-        state.dipper_last_status_check_ms = current_utc_ms;
+    if (current_utc_ms - state.dipper_last_status_check_ms) > 500 {
+        surface_contact_monitor(ctx, current_utc_ms, state, measured_ma).await?;
     }
 
     Ok(())
 }
+
+// pub async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context, 
+//     state: &mut StepperDriverState, current_utc_ms: i64)
+//     -> Result<(), Box<dyn std::error::Error>> 
+// {
+//     if !state.dipper_enabled {return Ok(()) };
+
+//     if state.dipper_last_status_check_ms == 0 {
+//         println!("{} Fresh Dipper",current_utc_ms);
+//         enable_sport_mode06(ctx,state).await?;
+//     }
+
+    // // only check the status periodically, because there can be some pauses and delays between reversals and loops
+    // if (current_utc_ms - state.dipper_last_status_check_ms) > 5000 {
+    //     let (op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
+    //     println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motor_direction, pulse_count, action_count);
+
+//         // If preprogrammed motion loop has finished, start it again:
+//         if op_status == 0 { // "Stopped"
+//             if motor_direction == state.dipper_prior_motion_direction  {
+//                 if pulse_count == state.dipper_prior_pulse_count {
+//                     // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
+//                     if action_count == state.dipper_prior_action_count {
+//                         println!("{} Next dip cycle", current_utc_ms);
+//                         start_sport_mode06_sequence(ctx).await?;
+//                     }
+//                 }
+//             }
+//         }
+
+//         state.dipper_prior_motion_direction = motor_direction;
+//         state.dipper_prior_action_count = action_count;
+//         state.dipper_prior_pulse_count = pulse_count;
+//         state.dipper_last_status_check_ms = current_utc_ms;
+//     }
+
+//     Ok(())
+// }
 
 

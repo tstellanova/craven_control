@@ -68,18 +68,18 @@ pub const REG_YKPVCCS_MONITOR_MILLIAMPS: u16  = 0x11; // read YK-PVCCS ammeter
 
 
 /// minimum current stabilization time supported by the current source
-const CURRENT_SOURCE_STABILIZATION_MS: u64 = 25;
+pub const CURRENT_SOURCE_STABILIZATION_MS: u64 = 25;
 /// time we allow the current to settle, after driving, before measuring
-const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(CURRENT_SOURCE_STABILIZATION_MS);
+pub const CURRENT_SOURCE_WAIT_TIME: Duration = Duration::from_millis(CURRENT_SOURCE_STABILIZATION_MS);
 
 /// The minimum increment for drive current, as specified in the current source docs
-const MIN_DRIVE_CURRENT_INCR_MA: f32 = 1.0;
+pub const MIN_DRIVE_CURRENT_INCR_MA: f32 = 1.0;
 
 /// Arbitrary value for "infinite" resistance (open circuit) between electrodes
-const INF_INTER_ELECTRODE_OHMS: f32 = 666.;
+pub const INF_INTER_ELECTRODE_OHMS: f32 = 666.;
 
 /// We only recognize current values reported by the current source above this threshold
-const REPORTED_CURRENT_THRESHOLD_MA: f32 = MIN_DRIVE_CURRENT_INCR_MA;
+pub const REPORTED_CURRENT_THRESHOLD_MA: f32 = MIN_DRIVE_CURRENT_INCR_MA;
 
 /// Combine two u16 registers into an i32
 pub fn registers_to_i32(registers: &[u16], offset: usize) -> i32 {

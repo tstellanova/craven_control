@@ -27,32 +27,23 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
 }
 
 
+
+
 /// 
 /// This function steps the cathode down until it makes solid contact with electrolyte
 ///
 pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
 {
     const DRIVE_CURRENT_MA: f32 = 4.;
-    const CHECK_CURRENT_MA: f32 = DRIVE_CURRENT_MA - 0.25;
 
     // Enable specific anode connections
     let  anode_channels= [false, false, false, true];
     write_wav_octo_relays(ctx, &anode_channels).await?;
 
-    // back off the probe a bit, first
-    set_rev_speed(ctx, SMC05_MEDIUM_MOVE_RATE_RPM).await?;
-    start_smc05_rev_rotation(ctx).await?;
-    sleep(Duration::from_millis(5000)).await;
-    stop_smc05_rotation(ctx).await?;
+    setup_cathode_surface_probe(ctx).await?;
 
-    // configure for surface contact probing
-    report_system_config(ctx).await?;
-    set_fwd_speed(ctx, SMC05_PROBE_DESCENT_RATE_RPM).await?;
-    set_rev_speed(ctx, SMC05_PULLBACK_RATE_RPM).await?;
-    enable_sport_mode03(ctx).await?;
-    report_system_config(ctx).await?;
+    let mut stepper_state = StepperDriverState::default();
 
-    let mut contact_start_time_ms = 0;
     loop {
         let (measured_volts, measured_ma, measured_ohms) = 
             drive_current_and_measure(ctx, DRIVE_CURRENT_MA).await?;
@@ -60,29 +51,14 @@ pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Contex
         if measured_ma > 0. {
             println!("{} {:.2} V {:.2} mA {:.2} Ohms", cur_time_utc_ms, measured_volts, measured_ma, measured_ohms);
         }
-        if measured_ma > CHECK_CURRENT_MA {
-            if contact_start_time_ms == 0 {
-                println!("touchdown!");
-                stop_smc05_rotation(ctx).await?;
-                contact_start_time_ms = cur_time_utc_ms;
+
+        surface_contact_monitor(ctx, cur_time_utc_ms, &mut stepper_state, measured_ma).await?;
+        if stepper_state.surface_contact_start_ms != 0 {
+            let contact_duration = cur_time_utc_ms - stepper_state.surface_contact_start_ms;
+            if contact_duration > 20000 {
+                println!("Contact duration: {}", contact_duration);
+                break;
             }
-            else {
-                start_smc05_rev_rotation(ctx).await?;
-                let contact_duration_ms = cur_time_utc_ms - contact_start_time_ms;
-                if contact_duration_ms > 20000 {
-                    println!("Finished contact duration: {}", contact_duration_ms);
-                    break;
-                }
-            }
-        }
-        else {
-            // not in contact
-            if contact_start_time_ms != 0 {
-                println!("{} Lost contact!",cur_time_utc_ms);
-                contact_start_time_ms = 0;
-            }
-            // Move some increment FWD / down into the crucible
-            start_smc05_fwd_rotation(ctx).await?;
         }
         sleep(Duration::from_millis(500)).await;
     }
@@ -148,7 +124,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Finished in {} ms", duration);
 
     set_electrode_current_drive(&mut ctx, 0.).await?;
-
     ctx.disconnect().await?;
 
     Ok(())

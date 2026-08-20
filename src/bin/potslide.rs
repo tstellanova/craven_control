@@ -72,10 +72,11 @@ const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
 
 /// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
 // const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.0)*30.; // Approximate area of twisted pair of 1 mm diameter, about 30 mm long
-const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*30.; // Approximate area of rod of 2 mm diameter, about 30 mm long
+// const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*30.; // Approximate area of rod of 2 mm diameter, about 30 mm long
+const ELECTRODE_SURFACE_MM2:f32 = 3. * 5.; // rectangular tip about 3 mm by 5 mm 
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4; 
+const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.2; 
 const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
 const NOM_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
 /// Maximum allowed current density during Cyclic growth phase
@@ -189,8 +190,9 @@ async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
     println!("Shutting down outputs...");
     toggle_furnace(ctx, false).await?;
     set_electrode_current_drive(ctx,0.).await?;
+    stop_smc05_rotation(ctx).await?;
 
-    let  anode_channels= [false; 4];
+    let anode_channels= [false; 4];
     write_wav_octo_relays(ctx, &anode_channels).await?;
 
     println!("Outputs disabled.");
@@ -357,7 +359,8 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
                 dipper_last_status_check_ms: 0, 
                 dipper_prior_motion_direction: 0, 
                 dipper_prior_pulse_count: 0, 
-                dipper_prior_action_count: 0 
+                dipper_prior_action_count: 0,
+                surface_contact_start_ms: 0,
             },
             phase_starts_utc_ms: [0; DrivePhase::Max as usize],
         }; 
@@ -500,7 +503,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         if state.phase_start_ms <  after_drive_utc_ms {  (after_drive_utc_ms - state.phase_start_ms) as u64 } 
         else { 0 };
 
-    dipper_cycle_check(ctx, &mut state.dipper_state, after_drive_utc_ms).await?;
+    dipper_cycle_check(ctx, &mut state.dipper_state, after_drive_utc_ms, measured_milliamps).await?;
     
 
     // reuse old drive current until instructed otherwise
