@@ -39,9 +39,16 @@ pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Contex
     let  anode_channels= [false, false, false, true];
     write_wav_octo_relays(ctx, &anode_channels).await?;
 
+    // back off the probe a bit, first
+    set_rev_speed(ctx, SMC05_MEDIUM_MOVE_RATE_RPM).await?;
+    start_smc05_rev_rotation(ctx).await?;
+    sleep(Duration::from_millis(5000)).await;
+    stop_smc05_rotation(ctx).await?;
+
+    // configure for surface contact probing
     report_system_config(ctx).await?;
-    set_fwd_speed(ctx, 60.).await?;
-    set_rev_speed(ctx, 5.).await?;
+    set_fwd_speed(ctx, SMC05_PROBE_DESCENT_RATE_RPM).await?;
+    set_rev_speed(ctx, SMC05_PULLBACK_RATE_RPM).await?;
     enable_sport_mode03(ctx).await?;
     report_system_config(ctx).await?;
 
@@ -54,15 +61,15 @@ pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Contex
             println!("{} {:.2} V {:.2} mA {:.2} Ohms", cur_time_utc_ms, measured_volts, measured_ma, measured_ohms);
         }
         if measured_ma > CHECK_CURRENT_MA {
-            println!("touchdown!");
             if contact_start_time_ms == 0 {
+                println!("touchdown!");
                 stop_smc05_rotation(ctx).await?;
                 contact_start_time_ms = cur_time_utc_ms;
             }
             else {
                 start_smc05_rev_rotation(ctx).await?;
                 let contact_duration_ms = cur_time_utc_ms - contact_start_time_ms;
-                if contact_duration_ms > 10000 {
+                if contact_duration_ms > 20000 {
                     println!("Finished contact duration: {}", contact_duration_ms);
                     break;
                 }
@@ -76,7 +83,7 @@ pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Contex
             }
             // Move some increment FWD / down into the crucible
             start_smc05_fwd_rotation(ctx).await?;
-q        }
+        }
         sleep(Duration::from_millis(500)).await;
     }
 
@@ -111,6 +118,14 @@ pub async fn sport_modes_test(ctx: &mut tokio_modbus::client::Context) -> Result
     Ok(())
 }
 
+
+ /// Set the output drive current of the test electrodes 
+async fn set_electrode_current_drive(ctx: &mut tokio_modbus::client::Context, milliamps: f32) -> Result<(), Box<dyn std::error::Error>> 
+{
+    // set_ykpvccs0100_current_drive(ctx, milliamps).await
+    set_ykpvccs1000_current_drive(ctx, milliamps).await
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
@@ -131,6 +146,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     step_down_to_contact_surface(&mut ctx).await?;
     let duration =  chrono::Utc::now().timestamp_millis() - start_time_ms;
     println!("Finished in {} ms", duration);
+
+    set_electrode_current_drive(&mut ctx, 0.).await?;
 
     ctx.disconnect().await?;
 

@@ -102,6 +102,10 @@ const SMC05_ACCEL_TIME_MS: u64 = 1000;
 pub const SMC05_ROTATION_DIR_FWD: u16 = 0;
 pub const SMC05_ROTATION_DIR_REV: u16 = 1;
 
+pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = 120.;
+pub const SMC05_PROBE_DESCENT_RATE_RPM: f32 = 60.;
+pub const SMC05_PULLBACK_RATE_RPM: f32 = 3.;
+
 pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>>
 {
