@@ -54,9 +54,9 @@ pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Contex
             break;
         }
         else {
-            let (op_status, motion_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
-            println!("{} > op {} dir {} pulse {} action {}", cur_time_utc_ms, op_status, motion_direction, pulse_count, action_count);
-            if motion_direction == 1 { // in reverse??
+            let (op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
+            println!("{} > op {} dir {} pulse {} action {}", cur_time_utc_ms, op_status, motor_direction, pulse_count, action_count);
+            if motor_direction == 1 { // in reverse??
                 send_smc05_fwd_rotation_cmd(ctx).await?;
             }
 
@@ -72,60 +72,27 @@ pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Contex
 
 pub async fn sport_modes_test(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
 {
-    // const DRIVE_CURRENT_MA: f32 = 4.;
-    // const CHECK_CURRENT_MA: f32 = DRIVE_CURRENT_MA - 0.25;
-
     // Enable a specific anode connection
     let  anode_channels= [false, false, false, false];
     write_wav_octo_relays(ctx, &anode_channels).await?;
 
-    stop_smc05_rotation(ctx).await?;
-    // Enable forward motion
-    println!("Set Mode 03...");
-    enable_sport_mode03(ctx).await?;
-    let (op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
+    set_smc05_sport_mode(ctx, 3).await?;
+
+    let (op_status, _motor_direction) = report_smc05_motor_status(ctx).await?;
     if op_status != 0 {
         stop_smc05_rotation(ctx).await?;
     }
 
-    if motor_direction == 0 {
-        start_smc05_rev_rotation(ctx).await?;
-        sleep(Duration::from_millis(1000)).await;
-    }
-    else {
-        start_smc05_fwd_rotation(ctx).await?;
-        sleep(Duration::from_millis(1000)).await;
-    }
+    start_smc05_rev_rotation(ctx).await?;
+    sleep(Duration::from_millis(1000)).await;
+    start_smc05_fwd_rotation(ctx).await?;
+    sleep(Duration::from_millis(1000)).await;
+    start_smc05_rev_rotation(ctx).await?;
+    sleep(Duration::from_millis(1000)).await;
 
-    stop_smc05_rotation(ctx).await?;
-    sleep(Duration::from_millis(500)).await;
-
-
-    // loop {
-    //     let (measured_volts, measured_ma, measured_ohms) = 
-    //         drive_current_and_measure(ctx, DRIVE_CURRENT_MA).await?;
-    //     let cur_time_utc_ms = chrono::Utc::now().timestamp_millis();
-    //     println!("{} {:.2} V {:.2} mA {:.2} Ohms", cur_time_utc_ms, measured_volts, measured_ma, measured_ohms);
-    //     if measured_ma > CHECK_CURRENT_MA {
-    //         // send_smc05_fwd_rotation_cmd(ctx).await?;
-    //         println!("touchdown!");
-    //         break;
-    //     }
-    //     else {
-    //         let (op_status, motion_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
-    //         println!("{} > op {} dir {} pulse {} action {}", cur_time_utc_ms, op_status, motion_direction, pulse_count, action_count);
-    //         if motion_direction == 1 { // in reverse??
-    //             send_smc05_fwd_rotation_cmd(ctx).await?;
-    //         }
-
-    //         // Move some increment FWD / down into the crucible
-    //         send_smc05_start_stop_cmd(ctx).await?;
-    //         sleep(Duration::from_millis(500)).await;
-    //         send_smc05_start_stop_cmd(ctx).await?;
-    //     }
-    //     sleep(Duration::from_millis(1000)).await;
-    // }
     
+    stop_smc05_rotation(ctx).await?;
+
     Ok(())
 }
 

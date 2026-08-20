@@ -21,9 +21,10 @@ const SMC05_SPORT_MODE_06_FWD_REV_LOOP: u16 = 6;
 /// Tells the SMC05 to start (or stop) the preprogrammed loop
 const START_STOP_OP_COMMAND: u16 = 3;
 
-const ROTATION_DIR_FWD_CMD: u16 = 0;
-const ROTATION_DIR_REV_CMD: u16 = 1;
+const ROTATION_DIR_FWD_CMD: u16 = 1;
+const ROTATION_DIR_REV_CMD: u16 = 2;
 
+// TODO this documentation seems to be incorrect:
 // Controlling sport mode action with RS485 serial / Modbus:
 // 00 - forward rotation 
 // 01 - reverse rotation 
@@ -121,50 +122,38 @@ pub async fn read_stepper_driver_status(ctx: &mut tokio_modbus::client::Context)
     Ok((op_status, motion_direction, pulse_count, action_count))
 }
 
-pub async fn send_smc05_serial_op_cmd(ctx: &mut tokio_modbus::client::Context, op_cmd: u16) 
--> Result<(), Box<dyn std::error::Error>> 
-{
-    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
-    ctx.write_single_register(REG_SMC05_OPERATION_MODE, op_cmd).await??;
-    Ok(())
-}
-
 pub async fn start_sport_mode06_sequence(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
     send_smc05_start_stop_cmd(ctx).await
 }
 
-pub async fn send_smc05_fwd_rotation_cmd(ctx: &mut tokio_modbus::client::Context) 
--> Result<(), Box<dyn std::error::Error>> 
-{
-    send_smc05_serial_op_cmd(ctx, ROTATION_DIR_FWD_CMD).await
-}
-
 pub async fn report_smc05_motor_status(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(u16, u16), Box<dyn std::error::Error>>
 {
-    let (op_status, motion_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
+    let (op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
     println!("{} > op {} dir {} pulse {} action {}", 
-        chrono::Utc::now().timestamp_millis(), op_status, motion_direction, pulse_count, action_count);
-    Ok((op_status, motion_direction))
+        chrono::Utc::now().timestamp_millis(), op_status, motor_direction, pulse_count, action_count);
+    Ok((op_status, motor_direction))
 }
 
 const SMC05_ACCEL_TIME_MS: u64 = 1000;
+const SMC05_ROTATION_DIR_FWD: u16 = 0;
+const SMC05_ROTATION_DIR_REV: u16 = 1;
 
 pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>>
 {
-    let (_op_status, motion_direction) = report_smc05_motor_status(ctx).await?;
-    if motion_direction != 0 {
+    let (_op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
+    if motor_direction != SMC05_ROTATION_DIR_FWD {
         println!("FLIP -> Fwd");
-        send_smc05_rev_rotation_cmd(ctx).await?;
+        send_smc05_fwd_rotation_cmd(ctx).await?;
         sleep(Duration::from_millis(SMC05_ACCEL_TIME_MS)).await;
     }
     
-    let (op_status, motion_direction) = report_smc05_motor_status(ctx).await?;
+    let (op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
     if op_status == 0 { //still stopped?
-        println!("START Fwd {} ", motion_direction);
+        println!("START Fwd {} ", motor_direction);
         send_smc05_start_stop_cmd(ctx).await?;
     }
 
@@ -175,16 +164,16 @@ pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context)
 pub async fn start_smc05_rev_rotation(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>>
 {
-    let (_op_status, motion_direction) = report_smc05_motor_status(ctx).await?;
-    if motion_direction != 1 {
+    let (_op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
+    if motor_direction != SMC05_ROTATION_DIR_REV {
         println!("FLIP -> Rev");
-        send_smc05_fwd_rotation_cmd(ctx).await?;
+        send_smc05_rev_rotation_cmd(ctx).await?;
         sleep(Duration::from_millis(SMC05_ACCEL_TIME_MS)).await;
     }
     
-    let (op_status, motion_direction) = report_smc05_motor_status(ctx).await?;
+    let (op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
     if op_status == 0 { //still stopped?
-        println!("START Rev {}", motion_direction);
+        println!("START Rev {}", motor_direction);
         send_smc05_start_stop_cmd(ctx).await?;
     }
 
@@ -196,16 +185,33 @@ pub async fn stop_smc05_rotation(ctx: &mut tokio_modbus::client::Context)
 -> Result<(), Box<dyn std::error::Error>>
 {
     loop {
-        let (op_status, _motion_direction) = report_smc05_motor_status(ctx).await?; 
+        let (op_status, motion_direction) = report_smc05_motor_status(ctx).await?; 
         if 0 != op_status {
-            println!("STOP");
+            println!("STOP dir {}", motion_direction);
             send_smc05_start_stop_cmd(ctx).await?;
-            sleep(Duration::from_millis(SMC05_ACCEL_TIME_MS)).await;
+            sleep(Duration::from_millis(500)).await;
         }
         else { break };
     }
     Ok(())
 }
+
+pub async fn send_smc05_serial_op_cmd(ctx: &mut tokio_modbus::client::Context, op_cmd: u16) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+    // println!("0x0030 -> opcmd: {}", op_cmd);
+    ctx.write_single_register(REG_SMC05_OPERATION_MODE, op_cmd).await??;
+    // sleep(Duration::from_millis(100)).await;
+    Ok(())
+}
+
+pub async fn send_smc05_fwd_rotation_cmd(ctx: &mut tokio_modbus::client::Context) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    send_smc05_serial_op_cmd(ctx, ROTATION_DIR_FWD_CMD).await
+}
+
 pub async fn send_smc05_rev_rotation_cmd(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
@@ -239,6 +245,8 @@ pub fn toggle_dipper_monitor(state: &mut StepperDriverState) {
 pub async fn set_smc05_sport_mode(ctx: &mut tokio_modbus::client::Context,  mode: u16)
     -> Result<(), Box<dyn std::error::Error>> 
 {
+    println!("Set Sport Mode {}...", mode);
+
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
     ctx.write_single_register(REG_SMC05_SPORT_MODE, mode).await??;
     Ok(())
@@ -257,9 +265,9 @@ pub async fn enable_sport_mode06(ctx: &mut tokio_modbus::client::Context,
     -> Result<(), Box<dyn std::error::Error>> 
 {
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
-    let (_op_status, motion_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;            
+    let (_op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;            
     set_smc05_sport_mode(ctx, SMC05_SPORT_MODE_06_FWD_REV_LOOP).await?;
-    state.dipper_prior_motion_direction = motion_direction;
+    state.dipper_prior_motion_direction = motor_direction;
     state.dipper_prior_action_count = action_count;
     state.dipper_prior_pulse_count = pulse_count;
 
@@ -283,12 +291,12 @@ pub async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context,
 
     // only check the status periodically, because there can be some pauses and delays between reversals and loops
     if (current_utc_ms - state.dipper_last_status_check_ms) > SPORT_MODE06_PROGRESS_PERIOD_MS {
-        let (op_status, motion_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
-        println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motion_direction, pulse_count, action_count);
+        let (op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
+        println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motor_direction, pulse_count, action_count);
 
         // If preprogrammed motion loop has finished, start it again:
         if op_status == 0 { // "Stopped"
-            if motion_direction == state.dipper_prior_motion_direction  {
+            if motor_direction == state.dipper_prior_motion_direction  {
                 if pulse_count == state.dipper_prior_pulse_count {
                     // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
                     if action_count == state.dipper_prior_action_count {
@@ -299,7 +307,7 @@ pub async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context,
             }
         }
 
-        state.dipper_prior_motion_direction = motion_direction;
+        state.dipper_prior_motion_direction = motor_direction;
         state.dipper_prior_action_count = action_count;
         state.dipper_prior_pulse_count = pulse_count;
         state.dipper_last_status_check_ms = current_utc_ms;
