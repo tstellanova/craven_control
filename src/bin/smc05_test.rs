@@ -40,14 +40,12 @@ pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Contex
     write_wav_octo_relays(ctx, &anode_channels).await?;
 
     report_system_config(ctx).await?;
-    set_fwd_speed(ctx, 120.).await?;
-    set_rev_speed(ctx, 120.).await?;
+    set_fwd_speed(ctx, 60.).await?;
+    set_rev_speed(ctx, 5.).await?;
     enable_sport_mode03(ctx).await?;
     report_system_config(ctx).await?;
 
-    // Enable forward motion
-    start_smc05_fwd_rotation(ctx).await?;
-
+    let mut contact_start_time_ms = 0;
     loop {
         let (measured_volts, measured_ma, measured_ohms) = 
             drive_current_and_measure(ctx, DRIVE_CURRENT_MA).await?;
@@ -56,14 +54,30 @@ pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Contex
             println!("{} {:.2} V {:.2} mA {:.2} Ohms", cur_time_utc_ms, measured_volts, measured_ma, measured_ohms);
         }
         if measured_ma > CHECK_CURRENT_MA {
-            // send_smc05_fwd_rotation_cmd(ctx).await?;
             println!("touchdown!");
-            break;
+            if contact_start_time_ms == 0 {
+                stop_smc05_rotation(ctx).await?;
+                contact_start_time_ms = cur_time_utc_ms;
+            }
+            else {
+                start_smc05_rev_rotation(ctx).await?;
+                let contact_duration_ms = cur_time_utc_ms - contact_start_time_ms;
+                if contact_duration_ms > 10000 {
+                    println!("Finished contact duration: {}", contact_duration_ms);
+                    break;
+                }
+            }
         }
         else {
+            // not in contact
+            if contact_start_time_ms != 0 {
+                println!("{} Lost contact!",cur_time_utc_ms);
+                contact_start_time_ms = 0;
+            }
             // Move some increment FWD / down into the crucible
-            sleep(Duration::from_millis(1000)).await;
-        }
+            start_smc05_fwd_rotation(ctx).await?;
+q        }
+        sleep(Duration::from_millis(500)).await;
     }
 
     stop_smc05_rotation(ctx).await?;
