@@ -104,8 +104,8 @@ pub const SMC05_ROTATION_DIR_FWD: u16 = 0;
 pub const SMC05_ROTATION_DIR_REV: u16 = 1;
 
 pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = 120.;
-pub const SMC05_PROBE_DESCENT_RATE_RPM: f32 = 60.;
-pub const SMC05_PULLBACK_RATE_RPM: f32 = 3.;
+pub const SMC05_PROBE_DESCENT_RATE_RPM: f32 = 80.;
+pub const SMC05_PULLBACK_RATE_RPM: f32 = 1.;
 
 pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>>
@@ -223,7 +223,7 @@ pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context
 pub async fn surface_contact_monitor(ctx: &mut tokio_modbus::client::Context, cur_time_utc_ms: i64, state: &mut StepperDriverState, measured_ma: f32) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    const CHECK_CURRENT_MA: f32 = 3.75;
+    const CHECK_CURRENT_MA: f32 = 1.0;
 
     if measured_ma > CHECK_CURRENT_MA {
         if state.surface_contact_start_ms == 0 {
@@ -329,7 +329,7 @@ pub async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context,
     }
 
     // only check the status periodically, because there can be some pauses and delays between reversals and loops
-    if (current_utc_ms - state.dipper_last_status_check_ms) > 500 {
+    if (current_utc_ms - state.dipper_last_status_check_ms) > 1000 {
         surface_contact_monitor(ctx, current_utc_ms, state, measured_ma).await?;
     }
 
