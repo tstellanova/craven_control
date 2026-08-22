@@ -185,7 +185,7 @@ async fn toggle_furnace(ctx: &mut tokio_modbus::client::Context, active:bool)
 async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    println!("Shutting down outputs...");
+    println!("zero_control_outputs...");
     toggle_furnace(ctx, false).await?;
     set_electrode_current_drive(ctx,0.).await?;
     stop_smc05_rotation(ctx).await?;
@@ -812,14 +812,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-
         let furnace_res = 
             tokio::time::timeout(MODBUS_TRANSACTION_TIMEOUT,control_furnace(&mut ctx, &mut furnace_state)).await;
         if !furnace_res.is_ok() { 
             eprintln!("control_furnace timeout: {:?}",furnace_res);
             break;
         }
-
 
         if (furnace_state.measured_temp_c > MIN_ELECTRODE_CHECK_TEMP_C &&  furnace_state.measured_temp_c < EXCESSIVE_HEAT_TEMP_C) ||
             electrode_state.drive_phase != DrivePhase::Fresh 
@@ -858,29 +856,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Flushing log file...");
     csv_writer.flush()?;
 
-
-    // Attempt to shut off all outputs before exiting.
-    // We reconnect to modbus to flush any cruft buffered at the WiFi bridge.
+    // Disconnect and then reconnect to shutdown outputs
     println!("Disconnecting...");
     ctx.disconnect().await?;
-    sleep(Duration::from_secs(2)).await;
-    println!("Reconnecting to: '{socket_addr:?}' ...");
-    ctx = tcp::connect(socket_addr).await?;
-
-    zero_control_outputs(&mut ctx).await?;
-    println!("Disconnecting again...");
-    let foomp = ctx.disconnect().await;
-    if foomp.is_err() {
-        eprintln!("disconnect failed: {:?}", foomp);
+    let shutdown_res = tokio::time::timeout(MODBUS_TRANSACTION_TIMEOUT,robust_shutdown(socket_addr)).await;
+    if !shutdown_res.is_ok() { 
+        eprintln!("robust_shutdown timeout: {:?}",shutdown_res);
     }
-
     // dump logged timeline
     println!("phase_starts_ms: {:?}", electrode_state.phase_starts_utc_ms);
-
-    println!("finished...");
+    
     std::process::exit(0); 
 
 }
 
+
+
+/// Attempt to shut off all outputs before exiting.
+/// We reconnect to Modbus to flush any cruft buffered at the WiFi bridge.
+/// 
+async fn robust_shutdown(socket_addr: std::net::SocketAddr )
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    sleep(Duration::from_secs(2)).await;
+    println!("Reconnecting to: '{socket_addr:?}' ...");
+    let mut ctx = tcp::connect(socket_addr).await?;
+
+    // Zeroing control outputs
+    zero_control_outputs(&mut ctx).await?;
+
+    println!("Disconnecting again...");
+    let disconnect_res = ctx.disconnect().await;
+    if disconnect_res.is_err() {
+        eprintln!("Disconnect failed: {:?}", disconnect_res);
+    }
+
+    Ok(())
+}
 
 
