@@ -52,7 +52,7 @@ pub async fn step_down_to_contact_surface(ctx: &mut tokio_modbus::client::Contex
             println!("{} {:.2} V {:.2} mA {:.2} Ohms", cur_time_utc_ms, measured_volts, measured_ma, measured_ohms);
         }
 
-        surface_contact_monitor(ctx, cur_time_utc_ms, &mut stepper_state, measured_ma).await?;
+        surface_contact_monitor(ctx, cur_time_utc_ms, &mut stepper_state, 2.0, measured_ma).await?;
         if stepper_state.surface_contact_start_ms != 0 {
             let contact_duration = cur_time_utc_ms - stepper_state.surface_contact_start_ms;
             if contact_duration > 20000 {

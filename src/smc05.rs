@@ -18,24 +18,19 @@ pub const REG_SMC05_CUR_MOTOR_STATUS:u16  = 0x001A;
 /// SMC05 fwd/rev/start/stop operations
 pub const REG_SMC05_OPERATION_MODE: u16 = 0x0030; 
 
-/// In this sport mode , run either fwd or rev on command: stop on same command
+/// In this "sport mode", run either fwd or rev on command: stop on same command or using start/stop command
 const SMC05_SPORT_MODE_03_FWD_REV_RUNTIL: u16 = 3;
 
 /// In this "sport mode" run fwd,rev, with delays at direction changes
 const SMC05_SPORT_MODE_06_FWD_REV_LOOP: u16 = 6;
 
-/// Tells the SMC05 to start (or stop) the preprogrammed loop
-const START_STOP_OP_COMMAND: u16 = 3;
 
+/// Move the linear stepper motor in the Forward direction ("forward rotation" serial command)
 const ROTATION_DIR_FWD_CMD: u16 = 1;
+/// Move the linear stepper motor in the Reverse direction ("reverse rotation" serial command)
 const ROTATION_DIR_REV_CMD: u16 = 2;
-
-// TODO this documentation seems to be incorrect:
-// Controlling sport mode action with RS485 serial / Modbus:
-// 00 - forward rotation 
-// 01 - reverse rotation 
-// 03 - stop / start
-
+/// Tells the SMC05 to start (or stop) current motion / action according to the "Sports Mode"
+const START_STOP_OP_COMMAND: u16 = 3;
 
 
 #[derive(Debug, Clone)]
@@ -220,12 +215,15 @@ pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context
     Ok(())
 }
 
-pub async fn surface_contact_monitor(ctx: &mut tokio_modbus::client::Context, cur_time_utc_ms: i64, state: &mut StepperDriverState, measured_ma: f32) 
+pub async fn surface_contact_monitor(
+    ctx: &mut tokio_modbus::client::Context, 
+    cur_time_utc_ms: i64, 
+    state: &mut StepperDriverState, 
+    threshold_ma: f32,
+    measured_ma: f32) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    const CHECK_CURRENT_MA: f32 = 1.0;
-
-    if measured_ma > CHECK_CURRENT_MA {
+    if measured_ma > threshold_ma {
         if state.surface_contact_start_ms == 0 {
             println!("{} Dipper touchdown!", cur_time_utc_ms);
             stop_smc05_rotation(ctx).await?;
@@ -314,64 +312,7 @@ pub async fn enable_sport_mode06(ctx: &mut tokio_modbus::client::Context,
 }
 
 
-/// 
-/// Monitor the cathode dipping into the electrolyte.
-/// 
-pub async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context, 
-    state: &mut StepperDriverState, current_utc_ms: i64, measured_ma: f32)
-    -> Result<(), Box<dyn std::error::Error>> 
-{
-    if !state.dipper_enabled {return Ok(()) };
 
-    if state.dipper_last_status_check_ms == 0 {
-        println!("{} Fresh Dipper",current_utc_ms);
-        setup_cathode_surface_probe(ctx).await?;
-    }
 
-    // only check the status periodically, because there can be some pauses and delays between reversals and loops
-    if (current_utc_ms - state.dipper_last_status_check_ms) > 1000 {
-        surface_contact_monitor(ctx, current_utc_ms, state, measured_ma).await?;
-    }
-
-    Ok(())
-}
-
-// pub async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context, 
-//     state: &mut StepperDriverState, current_utc_ms: i64)
-//     -> Result<(), Box<dyn std::error::Error>> 
-// {
-//     if !state.dipper_enabled {return Ok(()) };
-
-//     if state.dipper_last_status_check_ms == 0 {
-//         println!("{} Fresh Dipper",current_utc_ms);
-//         enable_sport_mode06(ctx,state).await?;
-//     }
-
-    // // only check the status periodically, because there can be some pauses and delays between reversals and loops
-    // if (current_utc_ms - state.dipper_last_status_check_ms) > 5000 {
-    //     let (op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
-    //     println!("{} > op {} dir {} pulse {} action {}", current_utc_ms, op_status, motor_direction, pulse_count, action_count);
-
-//         // If preprogrammed motion loop has finished, start it again:
-//         if op_status == 0 { // "Stopped"
-//             if motor_direction == state.dipper_prior_motion_direction  {
-//                 if pulse_count == state.dipper_prior_pulse_count {
-//                     // if action_count doesn't equal prior, that would indicate we're starting a new cycle of the loop
-//                     if action_count == state.dipper_prior_action_count {
-//                         println!("{} Next dip cycle", current_utc_ms);
-//                         start_sport_mode06_sequence(ctx).await?;
-//                     }
-//                 }
-//             }
-//         }
-
-//         state.dipper_prior_motion_direction = motor_direction;
-//         state.dipper_prior_action_count = action_count;
-//         state.dipper_prior_pulse_count = pulse_count;
-//         state.dipper_last_status_check_ms = current_utc_ms;
-//     }
-
-//     Ok(())
-// }
 
 

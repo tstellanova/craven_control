@@ -42,7 +42,9 @@ const MAINLOOP_DELAY: Duration = Duration::from_millis(100);
 const WARMUP_PHASE_DUR_MS: u64 = 30*1000; 
 
 /// Minimum time for automated Nucleation phase
-const NUCLEATION_DURATION_MS: u64 = 10*60*1000;
+const NUCLEATION_DURATION_MINUTES: u64 = 10;
+const NUCLEATION_DURATION_SEC: u64 = NUCLEATION_DURATION_MINUTES*60;
+const NUCLEATION_DURATION_MS: u64 = NUCLEATION_DURATION_SEC*1000;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -71,22 +73,22 @@ const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 0.5;
 const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
 
 /// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
-// const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(1.0)*30.; // Approximate area of twisted pair of 1 mm diameter, about 30 mm long
-// const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*30.; // Approximate area of rod of 2 mm diameter, about 30 mm long
-const ELECTRODE_SURFACE_MM2:f32 = 3. * 5.; // rectangular tip about 3 mm by 5 mm 
+// const ELECTRODE_SURFACE_MM2:f32 = f32::consts::PI*(1.0)*30.; // Approximate area of twisted pair of 1 mm diameter, about 30 mm long
+// const ELECTRODE_SURFACE_MM2:f32 = f32::consts::PI*(2.0)*30.; // Approximate area of rod of 2 mm diameter, about 30 mm long
+// const ELECTRODE_SURFACE_MM2:f32 = 3. * 5.; // rectangular tip about 3 mm by 5 mm 
+const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*2.0  + std::f32::consts::PI*1.0*1.0; // A dipped tip about 2 mm OD, 2 mm long, plus end cap
+const ELECTRODE_SURFACE_CM2: f32 = ELECTRODE_SURFACE_MM2 / 100.;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
 const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.2; 
-const ELONGATION_CURRENT_DENSITY_MA_MM2:f32 = (ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
-const NOM_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_MM2 * ELONGATION_CURRENT_DENSITY_MA_MM2;
+const NOM_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_ELONGATION_CURRENT_MA);
 const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
-const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = ELONGATION_CURRENT_DENSITY_AMPS_CM2/20.;
-const NUCLEATION_CURRENT_DENSITY_MA_MM2:f32 = (NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.)/100.;
-const NOM_NUCLEATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_MM2 * NUCLEATION_CURRENT_DENSITY_MA_MM2;
+const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.015; 
+const NOM_NUCLEATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.;
 /// Maximum allowed current density during Nucleation phase
 const MAX_NUCLEATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_NUCLEATION_CURRENT_MA);
 
@@ -99,7 +101,7 @@ const CYCLIC_GROWTH_FLOOR_V: f32 = 1.3;
 const CYCLIC_LOWV_MINR_MEASURE_V: f32 = 1.4;
 
 /// The duration of the High voltage growth segment of the Cyclic phase
-const CYCLIC_HIGHV_DURATION_MS: u64 = 240*1000;
+const CYCLIC_HIGHV_DURATION_MS: u64 = 300*1000;
 /// The duration of the Low voltage measurement segment of the Cyclic phase
 const CYCLIC_LOWV_DURATION_MS: u64 = 20*1000;
 /// Total duration of the combined high/low Cyclic phase drive cycle
@@ -483,6 +485,29 @@ fn trans_holding_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_dura
 }
 
 
+/// 
+/// Monitor the cathode dipping into the electrolyte.
+/// 
+pub async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context, 
+    state: &mut ElectrodeState, current_utc_ms: i64, measured_ma: f32)
+    -> Result<(), Box<dyn std::error::Error>> 
+{
+    if !state.dipper_state.dipper_enabled {return Ok(()) };
+
+    if state.dipper_state.dipper_last_status_check_ms == 0 {
+        println!("{} Fresh Dipper",current_utc_ms);
+        setup_cathode_surface_probe(ctx).await?;
+    }
+
+    let threshold_current_ma = state.target_drive_ma / 20.;
+
+    // only check the status periodically, because there can be some pauses and delays between reversals and loops
+    if (current_utc_ms - state.dipper_state.dipper_last_status_check_ms) > 1000 {
+        surface_contact_monitor(ctx, current_utc_ms, &mut state.dipper_state, threshold_current_ma, measured_ma).await?;
+    }
+
+    Ok(())
+}
 
 /// 
 /// Adjust the electrode current based on melt condition and drive phase
@@ -503,7 +528,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         if state.phase_start_ms <  after_drive_utc_ms {  (after_drive_utc_ms - state.phase_start_ms) as u64 } 
         else { 0 };
 
-    dipper_cycle_check(ctx, &mut state.dipper_state, after_drive_utc_ms, measured_milliamps).await?;
+    dipper_cycle_check(ctx, state, after_drive_utc_ms, measured_milliamps).await?;
     
 
     // reuse old drive current until instructed otherwise
@@ -549,8 +574,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             println!("Warmup: {} sec {:.1} Ω", phase_duration_ms/1000, state.measured_ohms);
         }
         DrivePhase::Nucleation => {
-            set_all_anode_connections(&mut state.anode_connections, true);
             new_drive_ma = MAX_NUCLEATION_CURRENT_MA;
+            set_all_anode_connections(&mut state.anode_connections, true);
 
             if phase_duration_ms > NUCLEATION_DURATION_MS  {
                 trans_elongation_phase(state, after_drive_utc_ms, phase_duration_ms);
@@ -617,10 +642,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
 
     // ensure that anode drive outputs are set correctly
-    // let anode_cycle_modulo_ms: usize = (phase_duration_ms as usize) % ANODE_ELONGATION_CONNECT_PERIOD_MS;
-    // if anode_cycle_modulo_ms < ANODE_CONNECTION_CHANGE_MS {
-        write_wav_octo_relays(ctx, &state.anode_connections).await?;
-    // }
+    write_wav_octo_relays(ctx, &state.anode_connections).await?;
 
     // Now, update the drive current for the next main loop iteration
     // state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
@@ -699,9 +721,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Furnace target {:.1} °C  cut-in {:.1} °C cut-out {:.1} °C excessive  {:.1} °C",
         ELECTROLYTE_TARGET_TEMP_C, CUT_IN_ABOVE_TARGET_TEMP_C, CUT_OUT_ABOVE_TARGET_TEMP_C, EXCESSIVE_HEAT_TEMP_C);
+    println!("Cathode area: {:.2} cm2 ({:.2} mm2)", ELECTRODE_SURFACE_CM2, ELECTRODE_SURFACE_MM2);
     println!("Warmup {} mA ; Holding {} mA", WARMUP_CURRENT_MA, HOLDING_PROBE_CURRENT_MA);
-    println!("Nucleate {} ms , {:.2} A/cm2, {:.2} mA max", 
-        NUCLEATION_DURATION_MS, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
+    println!("Nucleate {} minutes , {:.2} A/cm2, {:.2} mA max", 
+        NUCLEATION_DURATION_MINUTES, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
     println!("Elongate: {:.2} A/cm2, {:.2} mA max, Vmax {:.2}, Rot {:.2} ms, Term {:.1} Ω ", 
         ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,  ANODE_ELONGATION_CONNECT_PERIOD_MS,
         CYCLIC_LOWV_TERMINATION_OHMS);
