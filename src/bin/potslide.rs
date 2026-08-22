@@ -26,17 +26,13 @@ use craven_control::smc05::*;
 const INTER_LOOP_DELAY: Duration = Duration::from_millis(1000);
 
 /// Max time to wait for series of modbus transactions to complete
-const MODBUS_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(5);
+const MODBUS_TRANSACTION_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Pause in Modbus commands for "important" commands
 const MODBUS_RW_DELAY: Duration = Duration::from_millis(10);
 
 const MAINLOOP_DELAY: Duration = Duration::from_millis(100);
 
-
-// /// Empirically-derived average peak-to-peak interval for heating after warmup
-// const AVG_HEAT_CYCLE_DURATION_SEC: u64 = 260;
-// const AVG_PKPK_HEAT_CYCLE_MS: u64 = AVG_HEAT_CYCLE_DURATION_SEC * 1000;
 
 /// Minimum time for Warmup phase
 const WARMUP_PHASE_DUR_MS: u64 = 30*1000; 
@@ -53,7 +49,7 @@ const PROBE_CHECK_TEMP_C:f32 = 550.;
 /// Temp we expect to see when probe is succesfully inserted into melt
 const PROBE_INSERTED_TEMP_C:f32 = 600.;
 /// The center temperature we are trying to achieve for the electrolyte melt
-const ELECTROLYTE_TARGET_TEMP_C:f32 = 760.;
+const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 /// Below this temperature we don't drive start driving current through the electrodes.
 const MIN_ELECTRODE_CHECK_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C - 12.;
 /// The temperature at which the heater should cut in (turn on)

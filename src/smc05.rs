@@ -98,9 +98,15 @@ const SMC05_CHECK_ACCEL_TIME_MS: u64 = 250;
 pub const SMC05_ROTATION_DIR_FWD: u16 = 0;
 pub const SMC05_ROTATION_DIR_REV: u16 = 1;
 
-pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = 120.;
-pub const SMC05_PROBE_DESCENT_RATE_RPM: f32 = 80.;
-pub const SMC05_PULLBACK_RATE_RPM: f32 = 1.;
+/// Minimum rate at which the motor can move (without stopping)
+pub const SMC05_MIN_MOVE_RATE_RPM: f32 = 1.;
+
+pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = 60.;
+pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = SMC05_SLOW_MOVE_RATE_RPM * 2.;
+pub const SMC05_PROBE_DESCENT_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM;
+
+/// Very slow rate at which a cathode can be extracted with precision
+pub const SMC05_PULLBACK_RATE_RPM: f32 = SMC05_MIN_MOVE_RATE_RPM;
 
 pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>>
@@ -109,7 +115,6 @@ pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context)
     if motor_direction != SMC05_ROTATION_DIR_FWD {
         println!("FLIP -> Fwd");
         send_smc05_fwd_rotation_cmd(ctx).await?;
-        // sleep(Duration::from_millis(SMC05_CHECK_ACCEL_TIME_MS)).await;
     }
     else if op_status == 0 { //still stopped?
         println!("restart Fwd ");
@@ -126,7 +131,6 @@ pub async fn start_smc05_rev_rotation(ctx: &mut tokio_modbus::client::Context)
     if motor_direction != SMC05_ROTATION_DIR_REV {
         println!("FLIP -> Rev");
         send_smc05_rev_rotation_cmd(ctx).await?;
-        // sleep(Duration::from_millis(SMC05_CHECK_ACCEL_TIME_MS)).await;
     }
     else if op_status == 0 { //stopped
         println!("restart Rev");
@@ -157,7 +161,6 @@ pub async fn send_smc05_serial_op_cmd(ctx: &mut tokio_modbus::client::Context, o
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
     // println!("0x0030 -> opcmd: {}", op_cmd);
     ctx.write_single_register(REG_SMC05_OPERATION_MODE, op_cmd).await??;
-    // sleep(Duration::from_millis(100)).await;
     Ok(())
 }
 
@@ -199,12 +202,13 @@ pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context
 -> Result<(), Box<dyn std::error::Error>> 
 {
     enable_sport_mode03(ctx).await?;
-
-    // back off the probe a bit, first
-    set_rev_speed(ctx, SMC05_MEDIUM_MOVE_RATE_RPM).await?;
-    start_smc05_rev_rotation(ctx).await?;
-    sleep(Duration::from_millis(3000)).await;
     stop_smc05_rotation(ctx).await?;
+
+    // // back off the probe a bit, first
+    // set_rev_speed(ctx, SMC05_MEDIUM_MOVE_RATE_RPM).await?;
+    // start_smc05_rev_rotation(ctx).await?;
+    // sleep(Duration::from_millis(3000)).await;
+    // stop_smc05_rotation(ctx).await?;
 
     // configure for surface contact probing
     report_smc05_system_config(ctx).await?;
@@ -215,6 +219,10 @@ pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context
     Ok(())
 }
 
+///
+/// Try to maintain contact between the cathode and the surface of the electrolyte.
+/// If contact is lost, move the cathode down/forward to regain contact.
+/// If we have contact
 pub async fn surface_contact_monitor(
     ctx: &mut tokio_modbus::client::Context, 
     cur_time_utc_ms: i64, 
@@ -228,6 +236,7 @@ pub async fn surface_contact_monitor(
             println!("{} Dipper touchdown!", cur_time_utc_ms);
             stop_smc05_rotation(ctx).await?;
             state.surface_contact_start_ms = cur_time_utc_ms;
+            sleep(Duration::from_millis(1000)).await;
         }
         else {
             // start very slowly pulling the cathode out of the electrolyte
@@ -255,7 +264,7 @@ pub async fn report_smc05_system_config(ctx: &mut tokio_modbus::client::Context)
 {
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
     let status_resp: Vec<u16> = ctx.read_holding_registers(REG_SMC05_SPORT_MODE, 12).await??;
-    println!("sysconfig: {:?}", status_resp);
+    println!("SMC05 sysconfig: {:?}", status_resp);
     Ok(())
 }
 
