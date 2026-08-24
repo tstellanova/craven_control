@@ -98,6 +98,12 @@ const SMC05_CHECK_ACCEL_TIME_MS: u64 = 250;
 pub const SMC05_ROTATION_DIR_FWD: u16 = 0;
 pub const SMC05_ROTATION_DIR_REV: u16 = 1;
 
+
+pub const SMC05_MOTION_STATUS_STOPPED: u16 = 0;
+pub const SMC05_MOTION_STATUS_ACCEL: u16 = 1;
+pub const SMC05_MOTION_STATUS_DECEL: u16 = 2;
+pub const SMC05_MOTION_STATUS_CONSTANT_SPEED: u16 = 3;
+
 /// Minimum rate at which the motor can move (without stopping)
 pub const SMC05_MIN_MOVE_RATE_RPM: f32 = 1.;
 
@@ -111,12 +117,12 @@ pub const SMC05_PULLBACK_RATE_RPM: f32 = SMC05_MIN_MOVE_RATE_RPM;
 pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>>
 {
-    let (op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
+    let (op_status, motor_direction, _pulse_count, _action_count) = read_stepper_driver_status(ctx).await?;
     if motor_direction != SMC05_ROTATION_DIR_FWD {
         println!("FLIP -> Fwd");
         send_smc05_fwd_rotation_cmd(ctx).await?;
     }
-    else if op_status == 0 { //still stopped?
+    else if op_status == SMC05_MOTION_STATUS_STOPPED { //still stopped?
         println!("restart Fwd ");
         send_smc05_start_stop_cmd(ctx).await?;
     }
@@ -127,12 +133,12 @@ pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context)
 pub async fn start_smc05_rev_rotation(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>>
 {
-    let (op_status, motor_direction) = report_smc05_motor_status(ctx).await?;
+    let (op_status, motor_direction, _pulse_count, _action_count) = read_stepper_driver_status(ctx).await?;
     if motor_direction != SMC05_ROTATION_DIR_REV {
         println!("FLIP -> Rev");
         send_smc05_rev_rotation_cmd(ctx).await?;
     }
-    else if op_status == 0 { //stopped
+    else if op_status == SMC05_MOTION_STATUS_STOPPED { //stopped
         println!("restart Rev");
         send_smc05_start_stop_cmd(ctx).await?;
     }
@@ -145,7 +151,7 @@ pub async fn stop_smc05_rotation(ctx: &mut tokio_modbus::client::Context)
 {
     loop {
         let (op_status, motion_direction) = report_smc05_motor_status(ctx).await?; 
-        if 0 != op_status {
+        if op_status != SMC05_MOTION_STATUS_STOPPED {
             println!("STOP dir {}", motion_direction);
             send_smc05_start_stop_cmd(ctx).await?;
             sleep(Duration::from_millis(SMC05_CHECK_ACCEL_TIME_MS)).await;

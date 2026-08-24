@@ -45,9 +45,9 @@ const NUCLEATION_DURATION_MS: u64 = NUCLEATION_DURATION_SEC*1000;
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
 /// Temp at which we attempt to submerge thermo probes in electrolyte melt
-const PROBE_CHECK_TEMP_C:f32 = 550.; 
+const PROBE_CHECK_TEMP_C:f32 = 600.; 
 /// Temp we expect to see when probe is succesfully inserted into melt
-const PROBE_INSERTED_TEMP_C:f32 = 600.;
+const PROBE_INSERTED_TEMP_C:f32 = 650.;
 /// The center temperature we are trying to achieve for the electrolyte melt
 const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 /// Below this temperature we don't drive start driving current through the electrodes.

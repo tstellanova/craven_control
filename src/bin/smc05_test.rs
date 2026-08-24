@@ -76,10 +76,7 @@ pub async fn sport_modes_test(ctx: &mut tokio_modbus::client::Context) -> Result
 
     set_smc05_sport_mode(ctx, 3).await?;
 
-    let (op_status, _motor_direction) = report_smc05_motor_status(ctx).await?;
-    if op_status != 0 {
-        stop_smc05_rotation(ctx).await?;
-    }
+    stop_smc05_rotation(ctx).await?;
 
     start_smc05_rev_rotation(ctx).await?;
     sleep(Duration::from_millis(1000)).await;
