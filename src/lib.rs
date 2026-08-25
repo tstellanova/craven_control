@@ -379,6 +379,36 @@ pub async fn read_ykktc1202_dual_tk_temps(ctx: &mut tokio_modbus::client::Contex
 }
 
 
+/**
+ * Read the dual thermocouple reader
+ */
+pub async fn read_ykktc1202_one_tk_temp(ctx: &mut tokio_modbus::client::Context)
+-> Result<Option<f32>, Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_YKKTC1202_DUAL_TK));
+    // move RTK check into a separate function
+    // let cfg_rsp: Vec<u16> = ctx.read_holding_registers(0x20, 3).await??;
+    // println!(" 0x20 cfg_rsp: {:?}", cfg_rsp);
+
+    let tk_valid_resp: Vec<u16> = ctx.read_holding_registers(REG_YKKTC1202_VALIDITY, 1).await??;
+    // println!(" REG_TK_VALIDITY: {:?}", tk_valid_resp);
+    let mut ch1_tk_conn: bool = tk_valid_resp[0] == 0; // 0: The thermocouple is connected, 1: The thermocouple is not connected
+
+    // TODO use reg address consts
+    // example of reading all the dual TK registers:
+    let tk_resp: Vec<u16> = ctx.read_holding_registers(REG_YKKTC1202_TEMP_VALS, 1).await??;
+    // println!(" REG_TK_TEMP_VALS: {:?}", tk_resp);
+    let ch1_tk_val: f32 = (tk_resp[0] as f32) / 10.0; // resolution is 0.1 °C
+
+    // the TK reader will sometimes report a thermocouple is disconnected when it's not
+    if !ch1_tk_conn && ch1_tk_val < 1000.0 { //1000 C
+        ch1_tk_conn = true;
+    }
+
+    let ch1_tk_opt = if ch1_tk_conn { Some(ch1_tk_val) } else { None };
+    Ok(ch1_tk_opt)
+}
+
 pub async fn toggle_r4dvi04_relay(ctx: &mut tokio_modbus::client::Context, channel: u8, active: bool)
 -> Result<(), Box<dyn std::error::Error>> 
 {
@@ -412,6 +442,13 @@ pub async fn read_dual_tk_temps(ctx: &mut tokio_modbus::client::Context)
 -> Result<(Option<f32>, Option<f32>), Box<dyn std::error::Error>> 
 {
     read_ykktc1202_dual_tk_temps(ctx).await
+}
+
+
+pub async fn read_single_tk_temp(ctx: &mut tokio_modbus::client::Context)
+-> Result<Option<f32>, Box<dyn std::error::Error>> 
+{
+    read_ykktc1202_one_tk_temp(ctx).await
 }
 
  /// Set the output drive current of the test electrodes 

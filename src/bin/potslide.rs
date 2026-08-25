@@ -224,7 +224,10 @@ async fn control_furnace(ctx: &mut tokio_modbus::client::Context, state: &mut Fu
     let new_temp_setpoint_c: f32;
 
     // first, measure temperature
-    let (ch1_tk_opt, ch2_tk_opt) = read_dual_tk_temps(ctx).await?;
+    let ch1_tk_opt = read_single_tk_temp(ctx).await?;
+    let ch2_tk_opt = None;
+
+    // let (ch1_tk_opt, ch2_tk_opt) = read_dual_tk_temps(ctx).await?;
     let tk1_c = ch1_tk_opt.unwrap_or(0f32);
     let tk2_c = ch2_tk_opt.unwrap_or(0f32);
     let avg_core_tk_c: f32 = 
@@ -578,7 +581,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             } 
         }
         DrivePhase::Elongation => {
-            anode_connections_at_time_ms(phase_duration_ms, state);
+            // anode_connections_at_time_ms(phase_duration_ms, state);
+            set_all_anode_connections(&mut state.anode_connections, true);
+
 
             let goal_drive_volts = cyclic_voltage_at_time_ms(phase_duration_ms);
             // calculate current value for (nearly) constant voltage
