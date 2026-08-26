@@ -189,18 +189,18 @@ pub async fn send_smc05_start_stop_cmd(ctx: &mut tokio_modbus::client::Context)
 }
 
 /// Disable the dipper monitor
-pub fn disable_dipper_monitor(state: &mut StepperDriverState) {
+pub async fn disable_dipper_motion(ctx: &mut tokio_modbus::client::Context, state: &mut StepperDriverState)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    println!("Stopping dipper motion...");
+
+    if state.dipper_last_status_check_ms != 0 || state.dipper_enabled {
+        stop_smc05_rotation(ctx).await?;
+    }
+
     state.dipper_enabled = false;
     state.dipper_last_status_check_ms = 0;
-    println!("Dipper monitor canceling...");
-}
-
-/// If the dipper monitor is enabled, disable it (or vice-versa)
-pub fn toggle_dipper_monitor(state: &mut StepperDriverState) {
-    let old_enabled = state.dipper_enabled ;
-    state.dipper_enabled = !old_enabled;
-    state.dipper_last_status_check_ms = 0;
-    println!("Toggled dipper_enabled {} -> {}", old_enabled, state.dipper_enabled);
+    Ok(())
 }
 
 
@@ -209,12 +209,6 @@ pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context
 {
     enable_sport_mode03(ctx).await?;
     stop_smc05_rotation(ctx).await?;
-
-    // // back off the probe a bit, first
-    // set_rev_speed(ctx, SMC05_MEDIUM_MOVE_RATE_RPM).await?;
-    // start_smc05_rev_rotation(ctx).await?;
-    // sleep(Duration::from_millis(3000)).await;
-    // stop_smc05_rotation(ctx).await?;
 
     // configure for surface contact probing
     report_smc05_system_config(ctx).await?;

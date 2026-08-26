@@ -55,9 +55,9 @@ const MIN_ELECTRODE_CHECK_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C - 12.;
 /// The temperature at which the heater should cut in (turn on)
 const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 2.;
 /// The temperature at which the heater should cut out (turn off)
-const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 6.;
+const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 8.;
 /// How much higher than target temperature is "excessive" ?
-const EXCESSIVE_HEAT_DELTA_C: f32 = 12.;
+const EXCESSIVE_HEAT_DELTA_C: f32 = 16.;
 /// Above this temperature the furnace heat is out of control
 const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + EXCESSIVE_HEAT_DELTA_C;
 
@@ -424,63 +424,66 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
 }
 
 /// Transition to Warmup drive phase
-fn trans_warmup_phase(state: &mut ElectrodeState, trans_utc_ms: i64)
--> f32
+async fn trans_warmup_phase(ctx: &mut tokio_modbus::client::Context, state: &mut ElectrodeState, trans_utc_ms: i64)
+-> Result<f32, Box<dyn std::error::Error>> 
 {
     state.drive_phase = DrivePhase::Warmup;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Warmup as usize] = trans_utc_ms;
-    disable_dipper_monitor(&mut state.dipper_state);
+    disable_dipper_motion(ctx, &mut state.dipper_state).await?;
     println!("{} start Warmup phase", 
         trans_utc_ms, 
     );
-    WARMUP_CURRENT_MA
+    Ok(WARMUP_CURRENT_MA)
 }
 
 /// Transition to Nucleation drive phase
-fn trans_nucleation_phase(state: &mut ElectrodeState, trans_utc_ms: i64)
--> f32
+async fn trans_nucleation_phase(ctx: &mut tokio_modbus::client::Context, state: &mut ElectrodeState, trans_utc_ms: i64)
+-> Result<f32, Box<dyn std::error::Error>> 
 {
     state.drive_phase = DrivePhase::Nucleation;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Nucleation as usize] = trans_utc_ms;
-    disable_dipper_monitor(&mut state.dipper_state);
+    disable_dipper_motion(ctx, &mut state.dipper_state).await?;
     println!("{} start Nucleation phase w/Rewma {:.2} min {:.2} max {:.2} Ohms", 
         trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
     );
-    MAX_NUCLEATION_CURRENT_MA
+    Ok(MAX_NUCLEATION_CURRENT_MA)
 }
 
 /// Transition to Elongation drive phase
-fn trans_elongation_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_duration_ms: u64)
--> f32
+async fn trans_elongation_phase(ctx: &mut tokio_modbus::client::Context, state: &mut ElectrodeState, trans_utc_ms: i64, prior_duration_ms: u64)
+-> Result<f32, Box<dyn std::error::Error>> 
 {
     state.drive_phase = DrivePhase::Elongation;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Elongation as usize] = trans_utc_ms;
+    if !state.dipper_state.dipper_enabled {
+        disable_dipper_motion(ctx, &mut state.dipper_state).await?;
+    }
     println!("{} start Elongation phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
         trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms
     );
-    ELONGATION_PHASE_FALLBACK_MA
+    Ok(ELONGATION_PHASE_FALLBACK_MA)
 }
 
 /// Switch to Holding drive phase
-fn trans_holding_phase(state: &mut ElectrodeState, trans_utc_ms: i64, prior_duration_ms: u64)
--> f32
+async fn trans_holding_phase(ctx: &mut tokio_modbus::client::Context, state: &mut ElectrodeState, trans_utc_ms: i64, prior_duration_ms: u64)
+-> Result<f32, Box<dyn std::error::Error>> 
 {
     state.drive_phase = DrivePhase::Holding;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Holding as usize] = trans_utc_ms;
-    disable_dipper_monitor(&mut state.dipper_state);
+    disable_dipper_motion(ctx, &mut state.dipper_state).await?;
     println!("{} start Holding phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
         trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
         prior_duration_ms
     );
-    HOLDING_PROBE_CURRENT_MA
+    Ok(HOLDING_PROBE_CURRENT_MA)
 }
 
 
@@ -556,7 +559,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             set_all_anode_connections(&mut state.anode_connections, false);
             state.phase_starts_utc_ms[DrivePhase::Fresh as usize] = state.phase_start_ms;
             // just transition to next phase
-            new_drive_ma = trans_warmup_phase(state, after_drive_utc_ms);
+            new_drive_ma = trans_warmup_phase(ctx, state, after_drive_utc_ms).await?;
         }
         DrivePhase::Warmup => {
             // while the melt is warming up, monitor the current throughput 
@@ -577,7 +580,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             set_all_anode_connections(&mut state.anode_connections, true);
 
             if phase_duration_ms > NUCLEATION_DURATION_MS  {
-                trans_elongation_phase(state, after_drive_utc_ms, phase_duration_ms);
+                trans_elongation_phase(ctx, state, after_drive_utc_ms, phase_duration_ms).await?;
             } 
         }
         DrivePhase::Elongation => {
@@ -607,9 +610,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
                     if state.ohms_ewma < CYCLIC_LOWV_TERMINATION_OHMS {
                         new_drive_ma =
-                            trans_holding_phase(state, 
+                            trans_holding_phase(ctx, state, 
                                 after_drive_utc_ms,
-                                phase_duration_ms);
+                                phase_duration_ms).await?;
                     }
                 }
                 else {
@@ -679,7 +682,7 @@ fn set_all_anode_connections(connections: &mut [bool], active: bool)
 
 ///
 /// Calculate which anodes drive wires are connected (via relay switch) to the current supply at the given time
-fn anode_connections_at_time_ms(phase_duration_ms: u64, state: &mut ElectrodeState) 
+pub fn anode_connections_at_time_ms(phase_duration_ms: u64, state: &mut ElectrodeState) 
 {
     // we rate-limit how frequently the anode drive rotation is allowed to advance
     let cycle_modulo_ms: usize = (phase_duration_ms as usize) % ANODE_ELONGATION_CONNECT_PERIOD_MS;
@@ -726,8 +729,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Warmup {} mA ; Holding {} mA", WARMUP_CURRENT_MA, HOLDING_PROBE_CURRENT_MA);
     println!("Nucleate {} minutes , {:.2} A/cm2, {:.2} mA max", 
         NUCLEATION_DURATION_MINUTES, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Vmax {:.2}, Rot {:.2} ms, Term {:.1} Ω ", 
-        ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,  ANODE_ELONGATION_CONNECT_PERIOD_MS,
+    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Vmax {:.2}, Term {:.1} Ω ", 
+        ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,
         CYCLIC_LOWV_TERMINATION_OHMS);
 
 
@@ -781,19 +784,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 break;
                             }
                             "w" | "warmup" => {
-                                trans_warmup_phase(&mut electrode_state, current_utc_ms);
+                                trans_warmup_phase(&mut ctx, &mut electrode_state, current_utc_ms).await?;
                             },
                             "n" | "nucleate" => {
-                                trans_nucleation_phase(&mut electrode_state, current_utc_ms);
+                                trans_nucleation_phase(&mut ctx, &mut electrode_state, current_utc_ms).await?;
                             }
                             "e" | "elongate" => {
-                                trans_elongation_phase(&mut electrode_state, current_utc_ms, 0);
+                                trans_elongation_phase(&mut ctx, &mut electrode_state, current_utc_ms, 0).await?;
                             },
                             "h" | "holding" => {
-                                trans_holding_phase(&mut electrode_state,  current_utc_ms, 0);
+                                trans_holding_phase(&mut ctx, &mut electrode_state,  current_utc_ms, 0).await?;
                             }
                             "d" | "dip" => {
-                                toggle_dipper_monitor(&mut electrode_state.dipper_state);
+                                disable_dipper_motion(&mut ctx,  &mut electrode_state.dipper_state).await?;
                             }
                             other => println!("Unknown command: {other:?}"),
                         }
