@@ -796,7 +796,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 trans_holding_phase(&mut ctx, &mut electrode_state,  current_utc_ms, 0).await?;
                             }
                             "d" | "dip" => {
-                                disable_dipper_motion(&mut ctx,  &mut electrode_state.dipper_state).await?;
+                                toggle_dipper_monitor(&mut ctx,  &mut electrode_state.dipper_state).await?;
                             }
                             other => println!("Unknown command: {other:?}"),
                         }

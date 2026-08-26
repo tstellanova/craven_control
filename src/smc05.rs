@@ -188,13 +188,27 @@ pub async fn send_smc05_start_stop_cmd(ctx: &mut tokio_modbus::client::Context)
     send_smc05_serial_op_cmd(ctx, START_STOP_OP_COMMAND).await
 }
 
+/// Toggle the dipper monitor (active -> inactive or inactive -> active)
+pub async fn toggle_dipper_monitor(ctx: &mut tokio_modbus::client::Context, state: &mut StepperDriverState)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    if state.dipper_enabled {
+        disable_dipper_motion(ctx, state).await?
+    }
+    else {
+        state.dipper_enabled = true;
+        state.dipper_last_status_check_ms = 0;
+
+    }
+    Ok(())
+}
+
 /// Disable the dipper monitor
 pub async fn disable_dipper_motion(ctx: &mut tokio_modbus::client::Context, state: &mut StepperDriverState)
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    println!("Stopping dipper motion...");
-
     if state.dipper_last_status_check_ms != 0 || state.dipper_enabled {
+        println!("Stopping dipper motion...");
         stop_smc05_rotation(ctx).await?;
     }
 
