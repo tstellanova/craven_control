@@ -71,8 +71,9 @@ const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
 /// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
 // const ELECTRODE_SURFACE_MM2:f32 = f32::consts::PI*(1.0)*30.; // Approximate area of twisted pair of 1 mm diameter, about 30 mm long
 // const ELECTRODE_SURFACE_MM2:f32 = f32::consts::PI*(2.0)*30.; // Approximate area of rod of 2 mm diameter, about 30 mm long
-// const ELECTRODE_SURFACE_MM2:f32 = 3. * 5.; // rectangular tip about 3 mm by 5 mm 
-const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*2.0  + std::f32::consts::PI*1.0*1.0; // A dipped tip about 2 mm OD, 2 mm long, plus end cap
+// const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*2.0  + std::f32::consts::PI*1.0*1.0; // A dipped tip about 2 mm OD, 2 mm long, plus end cap
+const ELECTRODE_SURFACE_MM2:f32 = 5. * 5.; // rectangular tip about 5 mm by 5 mm 
+
 const ELECTRODE_SURFACE_CM2: f32 = ELECTRODE_SURFACE_MM2 / 100.;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
@@ -729,8 +730,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Warmup {} mA ; Holding {} mA", WARMUP_CURRENT_MA, HOLDING_PROBE_CURRENT_MA);
     println!("Nucleate {} minutes , {:.2} A/cm2, {:.2} mA max", 
         NUCLEATION_DURATION_MINUTES, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Vmax {:.2}, Term {:.1} Ω ", 
-        ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, CYCLIC_GROWTH_PEAK_V,
+    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Retract {:.1} RPM, Vmax {:.2}, Term {:.1} Ω ", 
+        ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, SMC05_PULLBACK_RATE_RPM, CYCLIC_GROWTH_PEAK_V,
         CYCLIC_LOWV_TERMINATION_OHMS);
 
 
