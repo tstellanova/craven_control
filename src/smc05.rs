@@ -18,6 +18,27 @@ pub const REG_SMC05_CUR_MOTOR_STATUS:u16  = 0x001A;
 /// SMC05 fwd/rev/start/stop operations
 pub const REG_SMC05_OPERATION_MODE: u16 = 0x0030; 
 
+/// Motor rotation direction is set to Forward (note that configuration can change physical direction)
+pub const SMC05_ROTATION_DIR_FWD: u16 = 0;
+/// Motor rotation direction is set to Reverse (note that configuration can change physical direction)
+pub const SMC05_ROTATION_DIR_REV: u16 = 1;
+
+pub const SMC05_MOTION_STATUS_STOPPED: u16 = 0;
+pub const SMC05_MOTION_STATUS_ACCEL: u16 = 1;
+pub const SMC05_MOTION_STATUS_DECEL: u16 = 2;
+pub const SMC05_MOTION_STATUS_CONSTANT_SPEED: u16 = 3;
+
+/// Minimum rate at which the motor can move (without stopping)
+pub const SMC05_MIN_MOVE_RATE_RPM: f32 = 0.1;
+
+pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = 60.;
+pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = SMC05_SLOW_MOVE_RATE_RPM * 2.;
+pub const SMC05_PROBE_DESCENT_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM;
+
+/// Very slow rate at which a cathode can be extracted with precision
+pub const SMC05_PULLBACK_RATE_RPM: f32 = 3.*SMC05_MIN_MOVE_RATE_RPM;
+
+
 /// In this "sport mode", run either fwd or rev on command: stop on same command or using start/stop command
 const SMC05_SPORT_MODE_03_FWD_REV_RUNTIL: u16 = 3;
 
@@ -95,24 +116,6 @@ pub async fn report_smc05_motor_status(ctx: &mut tokio_modbus::client::Context)
 
 const SMC05_CHECK_ACCEL_TIME_MS: u64 = 250;
 
-pub const SMC05_ROTATION_DIR_FWD: u16 = 0;
-pub const SMC05_ROTATION_DIR_REV: u16 = 1;
-
-
-pub const SMC05_MOTION_STATUS_STOPPED: u16 = 0;
-pub const SMC05_MOTION_STATUS_ACCEL: u16 = 1;
-pub const SMC05_MOTION_STATUS_DECEL: u16 = 2;
-pub const SMC05_MOTION_STATUS_CONSTANT_SPEED: u16 = 3;
-
-/// Minimum rate at which the motor can move (without stopping)
-pub const SMC05_MIN_MOVE_RATE_RPM: f32 = 1.;
-
-pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = 60.;
-pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = SMC05_SLOW_MOVE_RATE_RPM * 2.;
-pub const SMC05_PROBE_DESCENT_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM;
-
-/// Very slow rate at which a cathode can be extracted with precision
-pub const SMC05_PULLBACK_RATE_RPM: f32 = SMC05_MIN_MOVE_RATE_RPM;
 
 pub async fn start_smc05_fwd_rotation(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>>
@@ -260,7 +263,9 @@ pub async fn surface_contact_monitor(
     else {
         // not in contact
         if state.surface_contact_start_ms != 0 {
-            println!("{} Dipper lost contact!", cur_time_utc_ms);
+            let contact_duration_ms = cur_time_utc_ms - state.surface_contact_start_ms;
+            let contact_duration_minutes = (contact_duration_ms as f32) / 60000.;
+            println!("{} Dipper lost contact! ({} ms / {} minutes)", cur_time_utc_ms, contact_duration_ms, contact_duration_minutes);
             state.surface_contact_start_ms = 0;
         }
         // Move some increment FWD / down into the crucible

@@ -53,9 +53,9 @@ const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
 /// Below this temperature we don't drive start driving current through the electrodes.
 const MIN_ELECTRODE_CHECK_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C - 12.;
 /// The temperature at which the heater should cut in (turn on)
-const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 2.;
+const CUT_IN_ABOVE_TARGET_TEMP_C: f32 = 4.;
 /// The temperature at which the heater should cut out (turn off)
-const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 8.;
+const CUT_OUT_ABOVE_TARGET_TEMP_C: f32 = 10.;
 /// How much higher than target temperature is "excessive" ?
 const EXCESSIVE_HEAT_DELTA_C: f32 = 16.;
 /// Above this temperature the furnace heat is out of control
@@ -154,7 +154,7 @@ async fn enumerate_required_modules(ctx: &mut tokio_modbus::client::Context) -> 
 }
 
 #[repr(u8)]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 enum DrivePhase {
     /// No prior state
     Fresh = 0,
@@ -573,7 +573,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 state.lowv_minr_ohms = state.ohms_ewma;
                 state.highv_minr_ohms = state.ohms_ewma;
             }
-            println!("Warmup: {} sec {:.1} Ω", phase_duration_ms/1000, state.measured_ohms);
+            // println!("Warmup: {} sec {:.1} Ω", phase_duration_ms/1000, state.measured_ohms);
         }
         DrivePhase::Nucleation => {
             new_drive_ma = MAX_NUCLEATION_CURRENT_MA;
@@ -737,8 +737,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);
 
-    const CSV_HEADER: &str =  "epoch_ms,heat,dip,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,hvMinR,lvMinR";
-    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.3}" } }
+    const CSV_HEADER: &str =  "epoch_ms,dphase,heat,dip,avg_C,eleco_mA,elecm_mA,elecm_V,elec_R,Rew,hvMinR,lvMinR";
+    macro_rules! CSV_LINE_FORMAT { () => { "{},{},{},{},{:.2},{:.2},{:.2},{:.3},{:.3},{:.3},{:.3},{:.3}" } }
     
     println!("{}",CSV_HEADER);
     writeln!(csv_writer, "{}", CSV_HEADER)?;
@@ -844,6 +844,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let log_line = format!( CSV_LINE_FORMAT!(),
             current_utc_dt.timestamp_millis(),
+            electrode_state.drive_phase as u8,
             furnace_state.heater_on as u8,
             electrode_state.dipper_state.dipper_enabled as u8,
             furnace_state.measured_temp_c,
