@@ -76,7 +76,7 @@ const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*2.0  + std::f32::co
 const ELECTRODE_SURFACE_CM2: f32 = ELECTRODE_SURFACE_MM2 / 100.;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.2; 
+const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4; 
 const NOM_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_ELONGATION_CURRENT_MA);
