@@ -38,7 +38,7 @@ const MAINLOOP_DELAY: Duration = Duration::from_millis(100);
 const WARMUP_PHASE_DUR_MS: u64 = 30*1000; 
 
 /// Minimum time for automated Nucleation phase
-const NUCLEATION_DURATION_MINUTES: u64 = 10;
+const NUCLEATION_DURATION_MINUTES: u64 = 5;
 const NUCLEATION_DURATION_SEC: u64 = NUCLEATION_DURATION_MINUTES*60;
 const NUCLEATION_DURATION_MS: u64 = NUCLEATION_DURATION_SEC*1000;
 
@@ -84,7 +84,7 @@ const MAX_ELONGATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_ELONGA
 const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
-const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.02; 
+const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.04; 
 const NOM_NUCLEATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.;
 /// Maximum allowed current density during Nucleation phase
 const MAX_NUCLEATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_NUCLEATION_CURRENT_MA);
@@ -123,6 +123,12 @@ const ELONGATION_PHASE_FALLBACK_MA: f32 = MID_ELONGATION_CURRENT_MA;
 
 /// Weighting alpha for Exponential Weighted Moving Average of resistance
 const RESISTANCE_EWMA_ALPHA: f32 = 0.4;
+
+
+/// How long to continue inserting the cathode (under dipper control) after electrolyte melt surface contact is detected.
+const INSERTION_DURATION_MS: u64 = 3000;
+/// Ratio between the drive current and threshold current to detect whether we've made cathode contact with the electrolyte melt. 
+const SURFACE_CONTACT_THRESHOLD_RATIO: f32 = 4.;
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -359,6 +365,7 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             dipper_state: StepperDriverState {  // TODO replace with Default when const Default is stable
                 dipper_enabled: false, 
                 dipper_last_status_check_ms: 0, 
+                insertion_duration_ms: INSERTION_DURATION_MS,
                 dipper_prior_motion_direction: 0, 
                 dipper_prior_pulse_count: 0, 
                 dipper_prior_action_count: 0,
@@ -431,6 +438,7 @@ async fn trans_warmup_phase(ctx: &mut tokio_modbus::client::Context, state: &mut
     state.drive_phase = DrivePhase::Warmup;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Warmup as usize] = trans_utc_ms;
+    reset_dipper_move_rates(ctx).await?;
     disable_dipper_motion(ctx, &mut state.dipper_state).await?;
     println!("{} start Warmup phase", 
         trans_utc_ms, 
@@ -478,7 +486,10 @@ async fn trans_holding_phase(ctx: &mut tokio_modbus::client::Context, state: &mu
     state.drive_phase = DrivePhase::Holding;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[DrivePhase::Holding as usize] = trans_utc_ms;
+
     disable_dipper_motion(ctx, &mut state.dipper_state).await?;
+    reset_dipper_move_rates(ctx).await?;
+
     println!("{} start Holding phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
         trans_utc_ms, 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
@@ -502,7 +513,7 @@ pub async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context,
         setup_cathode_surface_probe(ctx).await?;
     }
 
-    let threshold_current_ma = state.target_drive_ma / 20.;
+    let threshold_current_ma = state.target_drive_ma / SURFACE_CONTACT_THRESHOLD_RATIO;
 
     // only check the status periodically, because there can be some pauses and delays between reversals and loops
     if (current_utc_ms - state.dipper_state.dipper_last_status_check_ms) > 1000 {
@@ -549,7 +560,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
             true
         }
-        else { false };
+        else { 
+            println!("{} ohms_ewma invalid: {:.2} mA, {:.1} Ohms", after_drive_utc_ms, state.measured_ma, measured_ohms);
+            false 
+        };
 
     state.measured_ohms = measured_ohms;
     state.measured_volts = measured_volts;
@@ -727,11 +741,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Furnace target {:.1} °C  cut-in {:.1} °C cut-out {:.1} °C excessive  {:.1} °C",
         ELECTROLYTE_TARGET_TEMP_C, CUT_IN_ABOVE_TARGET_TEMP_C, CUT_OUT_ABOVE_TARGET_TEMP_C, EXCESSIVE_HEAT_TEMP_C);
     println!("Cathode area: {:.2} cm2 ({:.2} mm2)", ELECTRODE_SURFACE_CM2, ELECTRODE_SURFACE_MM2);
+    println!("Dipper insertion duration: {} ms, threshold current ratio {:.2} ", INSERTION_DURATION_MS, SURFACE_CONTACT_THRESHOLD_RATIO);
     println!("Warmup {} mA ; Holding {} mA", WARMUP_CURRENT_MA, HOLDING_PROBE_CURRENT_MA);
     println!("Nucleate {} minutes , {:.2} A/cm2, {:.2} mA max", 
         NUCLEATION_DURATION_MINUTES, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Retract {:.1} RPM, Vmax {:.2}, Term {:.1} Ω ", 
-        ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, SMC05_PULLBACK_RATE_RPM, CYCLIC_GROWTH_PEAK_V,
+    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Insert {:.1} RPM, Retract {:.1} RPM, Vmax {:.2}, Term {:.1} Ω ", 
+        ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, SMC05_INSERTION_RATE_RPM,  SMC05_WITHDRAWAL_RATE_RPM, CYCLIC_GROWTH_PEAK_V,
         CYCLIC_LOWV_TERMINATION_OHMS);
 
 

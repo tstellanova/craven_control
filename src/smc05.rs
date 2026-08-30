@@ -31,12 +31,13 @@ pub const SMC05_MOTION_STATUS_CONSTANT_SPEED: u16 = 3;
 /// Minimum rate at which the motor can move (without stopping)
 pub const SMC05_MIN_MOVE_RATE_RPM: f32 = 0.1;
 
+pub const SMC05_XSLOW_MOVE_RATE_RPM: f32 = 10.;
 pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = 60.;
 pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = SMC05_SLOW_MOVE_RATE_RPM * 2.;
-pub const SMC05_PROBE_DESCENT_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM;
+pub const SMC05_INSERTION_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM;
 
 /// Very slow rate at which a cathode can be extracted with precision
-pub const SMC05_PULLBACK_RATE_RPM: f32 = 3.*SMC05_MIN_MOVE_RATE_RPM;
+pub const SMC05_WITHDRAWAL_RATE_RPM: f32 = SMC05_XSLOW_MOVE_RATE_RPM;
 
 
 /// In this "sport mode", run either fwd or rev on command: stop on same command or using start/stop command
@@ -60,6 +61,8 @@ pub struct StepperDriverState {
     pub dipper_enabled: bool, 
     /// Last time the driver status was checked
     pub dipper_last_status_check_ms: i64,
+    /// How long to continue inserting probe after surface contact is detected
+    pub insertion_duration_ms: u64,
     /// The prior direction of the SMC05 dipper motion
     pub dipper_prior_motion_direction: u16,
     /// The prior SMC05 pulse count (which indicates distance traveled)
@@ -74,6 +77,7 @@ impl Default for StepperDriverState {
     fn default() -> Self { Self { 
             dipper_enabled: false,
             dipper_last_status_check_ms: 0, 
+            insertion_duration_ms: 1000,
             dipper_prior_motion_direction: 0, 
             dipper_prior_pulse_count: 0, 
             dipper_prior_action_count: 0, 
@@ -229,8 +233,20 @@ pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context
 
     // configure for surface contact probing
     report_smc05_system_config(ctx).await?;
-    set_fwd_speed(ctx, SMC05_PROBE_DESCENT_RATE_RPM).await?;
-    set_rev_speed(ctx, SMC05_PULLBACK_RATE_RPM).await?;
+    set_fwd_speed(ctx, SMC05_INSERTION_RATE_RPM).await?;
+    set_rev_speed(ctx, SMC05_WITHDRAWAL_RATE_RPM).await?;
+    report_smc05_system_config(ctx).await?;
+
+    Ok(())
+}
+
+/// Reset movement rates to defaults
+pub async fn reset_dipper_move_rates(ctx: &mut tokio_modbus::client::Context) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    // reset move rates
+    set_rev_speed(ctx, SMC05_MEDIUM_MOVE_RATE_RPM).await?;
+    set_fwd_speed(ctx, SMC05_MEDIUM_MOVE_RATE_RPM).await?;
     report_smc05_system_config(ctx).await?;
 
     Ok(())
@@ -251,9 +267,10 @@ pub async fn surface_contact_monitor(
     if measured_ma > threshold_ma {
         if state.surface_contact_start_ms == 0 {
             println!("{} Dipper touchdown!", cur_time_utc_ms);
-            stop_smc05_rotation(ctx).await?;
             state.surface_contact_start_ms = cur_time_utc_ms;
-            sleep(Duration::from_millis(1000)).await;
+            // continue inserting past the initial contact point
+            sleep(Duration::from_millis(state.insertion_duration_ms)).await;
+            stop_smc05_rotation(ctx).await?;
         }
         else {
             // start very slowly pulling the cathode out of the electrolyte
