@@ -603,8 +603,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             // anode_connections_at_time_ms(phase_duration_ms, state);
             set_all_anode_connections(&mut state.anode_connections, true);
 
-
-            let goal_drive_volts = cyclic_voltage_at_time_ms(phase_duration_ms);
+            //cyclic_voltage_at_time_ms(phase_duration_ms);
+            // For now we max out the drive current and keep it on without measuring low current resistance
+            let goal_drive_volts = CYCLIC_GROWTH_PEAK_V; 
             // calculate current value for (nearly) constant voltage
             if ohms_ewma_valid {
                 new_drive_ma = (goal_drive_volts * 1000.) / state.measured_ohms;
@@ -675,7 +676,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
 ///
 /// Calculate the LowV/HighV voltage at a given time 
-fn cyclic_voltage_at_time_ms(phase_duration_ms: u64) -> f32 
+pub fn cyclic_voltage_at_time_ms(phase_duration_ms: u64) -> f32 
 {
     let remainder: u64 = phase_duration_ms % CYCLIC_PERIOD_MS;
 
