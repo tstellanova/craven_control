@@ -72,7 +72,8 @@ const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
 // const ELECTRODE_SURFACE_MM2:f32 = f32::consts::PI*(1.0)*30.; // Approximate area of twisted pair of 1 mm diameter, about 30 mm long
 // const ELECTRODE_SURFACE_MM2:f32 = f32::consts::PI*(2.0)*30.; // Approximate area of rod of 2 mm diameter, about 30 mm long
 // const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*2.0  + std::f32::consts::PI*1.0*1.0; // A dipped tip about 2 mm OD, 2 mm long, plus end cap
-const ELECTRODE_SURFACE_MM2:f32 = 5. * 5.; // rectangular tip about 5 mm by 5 mm 
+// const ELECTRODE_SURFACE_MM2:f32 = 5. * 5.; // rectangular tip about 5 mm by 5 mm 
+const ELECTRODE_SURFACE_MM2:f32 = 100.; // arbitrary, derived from prior 30 mm tip dip experiments
 
 const ELECTRODE_SURFACE_CM2: f32 = ELECTRODE_SURFACE_MM2 / 100.;
 

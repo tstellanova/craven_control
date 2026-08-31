@@ -31,7 +31,7 @@ pub const SMC05_MOTION_STATUS_CONSTANT_SPEED: u16 = 3;
 /// Minimum rate at which the motor can move (without stopping)
 pub const SMC05_MIN_MOVE_RATE_RPM: f32 = 0.1;
 
-pub const SMC05_XSLOW_MOVE_RATE_RPM: f32 = 10.;
+pub const SMC05_XSLOW_MOVE_RATE_RPM: f32 = 5.;
 pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = 60.;
 pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = SMC05_SLOW_MOVE_RATE_RPM * 2.;
 pub const SMC05_INSERTION_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM;
