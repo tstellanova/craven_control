@@ -63,7 +63,7 @@ const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + EXCESSIVE_HEAT_DEL
 
 
 /// Below this resistance value we terminate the Cyclic phase
-const CYCLIC_LOWV_TERMINATION_OHMS: f32 = 0.5;
+const CYCLIC_TERMINATION_OHMS: f32 = 0.5;
 
 /// Limit of the current supply
 const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
@@ -73,16 +73,19 @@ const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
 // const ELECTRODE_SURFACE_MM2:f32 = f32::consts::PI*(2.0)*30.; // Approximate area of rod of 2 mm diameter, about 30 mm long
 // const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*2.0  + std::f32::consts::PI*1.0*1.0; // A dipped tip about 2 mm OD, 2 mm long, plus end cap
 // const ELECTRODE_SURFACE_MM2:f32 = 5. * 5.; // rectangular tip about 5 mm by 5 mm 
-const ELECTRODE_SURFACE_MM2:f32 = 100.; // arbitrary, derived from prior 30 mm tip dip experiments
+const ELECTRODE_SURFACE_MM2:f32 = 100.; // 1 cm2: arbitrary, derived from prior 30 mm tip dip experiments
 
 const ELECTRODE_SURFACE_CM2: f32 = ELECTRODE_SURFACE_MM2 / 100.;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4; 
-const NOM_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
+const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.5; 
+const MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.05; 
+
+const NOM_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_ELONGATION_CURRENT_MA);
 const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
+const MIN_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
 const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.04; 
@@ -96,7 +99,7 @@ const CYCLIC_GROWTH_PEAK_V: f32 = 3.2;
 /// Lowest voltage to use during Cycling phase, where true inter-electrode resistance can be measured. 
 const CYCLIC_GROWTH_FLOOR_V: f32 = 1.3;
 /// Voltage at which to measure "Low V" minimum resistance
-const CYCLIC_LOWV_MINR_MEASURE_V: f32 = 1.4;
+// const CYCLIC_LOWV_MINR_MEASURE_V: f32 = 1.4;
 
 /// The duration of the High voltage growth segment of the Cyclic phase
 const CYCLIC_HIGHV_DURATION_MS: u64 = 300*1000;
@@ -105,6 +108,12 @@ const CYCLIC_LOWV_DURATION_MS: u64 = 20*1000;
 /// Total duration of the combined high/low Cyclic phase drive cycle
 const CYCLIC_PERIOD_MS: u64 = CYCLIC_LOWV_DURATION_MS + CYCLIC_HIGHV_DURATION_MS;
 
+/// The period over which to cycle the driving voltage / current supplied during Elongation
+const ELONGATION_CYCLE_PERIOD_MS: u64 = 5 * 60 * 1000;
+/// The the modulo remainder of elongation cycle period at which we reset the voltage cycle
+const ELONGATION_CYCLE_RESET_MS: u64 = 2000;
+
+const RAMP_RANGE_MA_PER_MS: f32 = (MAX_ELONGATION_CURRENT_MA - MIN_ELONGATION_CURRENT_MA)/(ELONGATION_CYCLE_PERIOD_MS as f32);
 
 /// Minimum time an anode should remain connected to current source during elongation phase
 const ANODE_ELONGATION_CONNECT_PERIOD_MS:usize = 1000;
@@ -313,7 +322,7 @@ pub struct ElectrodeState {
     /// Minimum resistance measured during Low-voltage drive
     lowv_minr_ohms: f32,
     /// The last time lowv_minr changed
-    lowv_minr_update_ms: i64,
+    // lowv_minr_update_ms: i64,
     /// Minimum resistance measured during High-voltage drive
     highv_minr_ohms: f32,
     /// The last time highv_minr changed
@@ -353,7 +362,7 @@ const INITIAL_ELECTRODE_STATE: ElectrodeState =
             measured_ohms:INF_INTER_ELECTRODE_OHMS,
             ohms_ewma:0.,
             lowv_minr_ohms: INF_INTER_ELECTRODE_OHMS,
-            lowv_minr_update_ms:0,
+            // lowv_minr_update_ms:0,
             highv_minr_ohms: INF_INTER_ELECTRODE_OHMS,
             highv_minr_update_ms:0,
             max_ohms_ewma: 0.,
@@ -602,55 +611,25 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Elongation => {
             // anode_connections_at_time_ms(phase_duration_ms, state);
             set_all_anode_connections(&mut state.anode_connections, true);
+            new_drive_ma = elongation_current_ma_at_time_ms(phase_duration_ms);
 
-            //cyclic_voltage_at_time_ms(phase_duration_ms);
-            // For now we max out the drive current and keep it on without measuring low current resistance
-            let goal_drive_volts = CYCLIC_GROWTH_PEAK_V; 
-            // calculate current value for (nearly) constant voltage
             if ohms_ewma_valid {
-                new_drive_ma = (goal_drive_volts * 1000.) / state.measured_ohms;
-
-                // cap at the current density allowed for this phase
-                if new_drive_ma >  MAX_ELONGATION_CURRENT_MA {
-                    //println!("Maxed {:.2} --> {:.2} mA", new_drive_ma, MAX_ELONGATION_CURRENT_MA);
-                    new_drive_ma = MAX_ELONGATION_CURRENT_MA;
-                }
-
                 // check for cyclic growth termination condition
-                if state.measured_volts <= CYCLIC_LOWV_MINR_MEASURE_V {
-                    if state.ohms_ewma < state.lowv_minr_ohms {
-                        println!("{} lowv {:.2} V,  LV_MinR -> {:.3} Ω", 
-                            after_drive_utc_ms, state.measured_volts, state.ohms_ewma);
-                        state.lowv_minr_ohms = state.ohms_ewma;
-                        state.lowv_minr_update_ms = after_drive_utc_ms;
-                    }
+                if state.ohms_ewma < state.highv_minr_ohms {
+                    println!("{} highv {:.2} V,  HV_MinR -> {:.3} Ω", 
+                        after_drive_utc_ms, state.measured_volts, state.ohms_ewma);
+                    state.highv_minr_ohms = state.ohms_ewma;
+                    state.highv_minr_update_ms = after_drive_utc_ms;
 
-                    if state.ohms_ewma < CYCLIC_LOWV_TERMINATION_OHMS {
+                    if state.ohms_ewma < CYCLIC_TERMINATION_OHMS {
                         new_drive_ma =
                             trans_holding_phase(ctx, state, 
                                 after_drive_utc_ms,
                                 phase_duration_ms).await?;
                     }
                 }
-                else {
-                    if state.ohms_ewma < state.highv_minr_ohms {
-                        println!("{} highv {:.2} V,  HV_MinR -> {:.3} Ω", 
-                            after_drive_utc_ms, state.measured_volts, state.ohms_ewma);
-                        state.highv_minr_ohms = state.ohms_ewma;
-                        state.highv_minr_update_ms = after_drive_utc_ms;
-                    }
-                }
-                
             }
-            else {
-                if goal_drive_volts == CYCLIC_GROWTH_PEAK_V {
-                    new_drive_ma = ELONGATION_PHASE_FALLBACK_MA;
-                }
-                else {
-                    new_drive_ma = 25.;
-                }
-                println!("{} Elongation fallback at {:.2} Ω : {:.1}", after_drive_utc_ms, state.ohms_ewma,new_drive_ma);
-            }
+
         }
         DrivePhase::Holding => {
             set_all_anode_connections(&mut state.anode_connections, true);
@@ -688,6 +667,24 @@ pub fn cyclic_voltage_at_time_ms(phase_duration_ms: u64) -> f32
         // end with HIGHV drive on each cycle
         CYCLIC_GROWTH_PEAK_V
     }
+}
+
+/// Calculate what the driving current should be during the Elongation phase
+fn elongation_current_ma_at_time_ms(phase_duration_ms: u64) -> f32 
+{
+    let time_since_cycle_start_ms: u64 = phase_duration_ms % ELONGATION_CYCLE_PERIOD_MS;
+    let ideal_current_ma = 
+        if time_since_cycle_start_ms < ELONGATION_CYCLE_RESET_MS {
+            // begin with LOWV drive on each cycle
+            MIN_ELONGATION_CURRENT_MA
+        }
+        else {
+            // simple linear ramp
+            (time_since_cycle_start_ms as f32) * RAMP_RANGE_MA_PER_MS
+        };
+        
+    f32::min(ideal_current_ma, MAX_DRIVE_CURRENT_MA)
+
 }
 
 ///
@@ -743,13 +740,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Furnace target {:.1} °C  cut-in {:.1} °C cut-out {:.1} °C excessive  {:.1} °C",
         ELECTROLYTE_TARGET_TEMP_C, CUT_IN_ABOVE_TARGET_TEMP_C, CUT_OUT_ABOVE_TARGET_TEMP_C, EXCESSIVE_HEAT_TEMP_C);
     println!("Cathode area: {:.2} cm2 ({:.2} mm2)", ELECTRODE_SURFACE_CM2, ELECTRODE_SURFACE_MM2);
-    println!("Dipper insertion duration: {} ms, threshold current ratio {:.2} ", INSERTION_DURATION_MS, SURFACE_CONTACT_THRESHOLD_RATIO);
     println!("Warmup {} mA ; Holding {} mA", WARMUP_CURRENT_MA, HOLDING_PROBE_CURRENT_MA);
     println!("Nucleate {} minutes , {:.2} A/cm2, {:.2} mA max", 
         NUCLEATION_DURATION_MINUTES, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: {:.2} A/cm2, {:.2} mA max, Insert {:.1} RPM, Retract {:.1} RPM, Vmax {:.2}, Term {:.1} Ω ", 
-        ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, SMC05_INSERTION_RATE_RPM,  SMC05_WITHDRAWAL_RATE_RPM, CYCLIC_GROWTH_PEAK_V,
-        CYCLIC_LOWV_TERMINATION_OHMS);
+    println!("Elongate: Max {:.2} A/cm2, {:.2} mA, Ramp {:.2} mA/ms, Term {:.1} Ω \nInsert {:.1} RPM, Retract {:.1} RPM, ", 
+        MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, RAMP_RANGE_MA_PER_MS, CYCLIC_TERMINATION_OHMS,
+        SMC05_INSERTION_RATE_RPM,  SMC05_WITHDRAWAL_RATE_RPM,
+        );
+    println!("Dipper insertion duration: {} ms, detect current ratio {:.2} ", INSERTION_DURATION_MS, SURFACE_CONTACT_THRESHOLD_RATIO);
 
 
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
