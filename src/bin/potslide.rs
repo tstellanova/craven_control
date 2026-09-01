@@ -136,7 +136,7 @@ const RESISTANCE_EWMA_ALPHA: f32 = 0.4;
 
 
 /// How long to continue inserting the cathode (under dipper control) after electrolyte melt surface contact is detected.
-const INSERTION_DURATION_MS: u64 = 3000;
+const INSERTION_DURATION_MS: u64 = 1500;
 /// Ratio between the drive current and threshold current to detect whether we've made cathode contact with the electrolyte melt. 
 const SURFACE_CONTACT_THRESHOLD_RATIO: f32 = 4.;
 
@@ -682,7 +682,7 @@ fn elongation_current_ma_at_time_ms(phase_duration_ms: u64) -> f32
             // simple linear ramp
             (time_since_cycle_start_ms as f32) * RAMP_RANGE_MA_PER_MS
         };
-        
+
     f32::min(ideal_current_ma, MAX_DRIVE_CURRENT_MA)
 
 }
