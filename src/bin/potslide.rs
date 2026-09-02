@@ -207,8 +207,8 @@ async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
     set_electrode_current_drive(ctx,0.).await?;
     stop_smc05_rotation(ctx).await?;
 
-    let anode_channels= [false; 4];
-    write_wav_octo_relays(ctx, &anode_channels).await?;
+    // let anode_channels= [false; 4];
+    // write_wav_octo_relays(ctx, &anode_channels).await?;
 
     println!("Outputs disabled.");
     Ok(())
@@ -642,7 +642,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
 
 
     // ensure that anode drive outputs are set correctly
-    write_wav_octo_relays(ctx, &state.anode_connections).await?;
+    // write_wav_octo_relays(ctx, &state.anode_connections).await?;
 
     // Now, update the drive current for the next main loop iteration
     // state.reported_drive_ma = set_electrode_current_drive(ctx, new_drive_ma).await?;
