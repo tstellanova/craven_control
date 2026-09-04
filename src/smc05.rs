@@ -34,7 +34,7 @@ pub const SMC05_MIN_MOVE_RATE_RPM: f32 = 0.1;
 pub const SMC05_XSLOW_MOVE_RATE_RPM: f32 = 5.;
 pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = 60.;
 pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = SMC05_SLOW_MOVE_RATE_RPM * 2.;
-pub const SMC05_INSERTION_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM;
+pub const SMC05_INSERTION_RATE_RPM: f32 = SMC05_XSLOW_MOVE_RATE_RPM;
 
 /// Very slow rate at which a cathode can be extracted with precision
 pub const SMC05_WITHDRAWAL_RATE_RPM: f32 = SMC05_XSLOW_MOVE_RATE_RPM;

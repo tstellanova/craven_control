@@ -79,14 +79,15 @@ const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(5.*5.); // Approximate a
 const ELECTRODE_SURFACE_CM2: f32 = ELECTRODE_SURFACE_MM2 / 100.;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.6; 
-const MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.3; 
+const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 1.0; 
+const MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.5; 
 
 const NOM_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_ELONGATION_CURRENT_MA);
 const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 const MIN_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
+const ELONGATION_RESET_CURRENT_MA: f32 = 2.;
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
 const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.04; 
@@ -424,7 +425,7 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
     // sanity check that measured current is close to (current source reported) drive current
     if state.reported_drive_ma > 2.*MIN_DRIVE_CURRENT_INCR_MA {
         let mr_current_gap_frac = (state.reported_drive_ma - measured_milliamps)/state.reported_drive_ma;
-        if mr_current_gap_frac > 0.05 {
+        if mr_current_gap_frac > 0.10 {
             println!("mr_current_gap : {:.3}", mr_current_gap_frac);
             measured_milliamps = state.reported_drive_ma;
         }
@@ -677,7 +678,7 @@ fn elongation_current_ma_at_time_ms(phase_duration_ms: u64) -> f32
     let ideal_current_ma = 
         if time_since_cycle_start_ms < ELONGATION_CYCLE_RESET_MS {
             // begin with LOWV drive on each cycle
-            MIN_ELONGATION_CURRENT_MA
+            ELONGATION_RESET_CURRENT_MA
         }
         else {
             // simple linear ramp
