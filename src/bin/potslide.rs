@@ -73,13 +73,14 @@ const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
 // const ELECTRODE_SURFACE_MM2:f32 = f32::consts::PI*(2.0)*30.; // Approximate area of rod of 2 mm diameter, about 30 mm long
 // const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*2.0  + std::f32::consts::PI*1.0*1.0; // A dipped tip about 2 mm OD, 2 mm long, plus end cap
 // const ELECTRODE_SURFACE_MM2:f32 = 5. * 5.; // rectangular tip about 5 mm by 5 mm 
-const ELECTRODE_SURFACE_MM2:f32 = 100.; // 1 cm2: arbitrary, derived from prior 30 mm tip dip experiments
+// const ELECTRODE_SURFACE_MM2:f32 = 100.; // 1 cm2: arbitrary, derived from prior 30 mm tip dip experiments
+const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(5.*5.); // Approximate area of disk about 5 mm radius
 
 const ELECTRODE_SURFACE_CM2: f32 = ELECTRODE_SURFACE_MM2 / 100.;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.5; 
-const MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.1; 
+const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.6; 
+const MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.3; 
 
 const NOM_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
 /// Maximum allowed current density during Cyclic growth phase
@@ -109,7 +110,7 @@ const CYCLIC_LOWV_DURATION_MS: u64 = 20*1000;
 const CYCLIC_PERIOD_MS: u64 = CYCLIC_LOWV_DURATION_MS + CYCLIC_HIGHV_DURATION_MS;
 
 /// The period over which to cycle the driving voltage / current supplied during Elongation
-const ELONGATION_CYCLE_PERIOD_MS: u64 = 5 * 60 * 1000;
+const ELONGATION_CYCLE_PERIOD_MS: u64 = 3 * 60 * 1000;
 /// The the modulo remainder of elongation cycle period at which we reset the voltage cycle
 const ELONGATION_CYCLE_RESET_MS: u64 = 2000;
 
@@ -138,7 +139,7 @@ const RESISTANCE_EWMA_ALPHA: f32 = 0.4;
 /// How long to continue inserting the cathode (under dipper control) after electrolyte melt surface contact is detected.
 const INSERTION_DURATION_MS: u64 = 1500;
 /// Ratio between the drive current and threshold current to detect whether we've made cathode contact with the electrolyte melt. 
-const SURFACE_CONTACT_THRESHOLD_RATIO: f32 = 4.;
+const SURFACE_CONTACT_THRESHOLD_RATIO: f32 = 2.;
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
