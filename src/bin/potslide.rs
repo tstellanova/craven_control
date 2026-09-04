@@ -744,7 +744,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Warmup {} mA ; Holding {} mA", WARMUP_CURRENT_MA, HOLDING_PROBE_CURRENT_MA);
     println!("Nucleate {} minutes , {:.2} A/cm2, {:.2} mA max", 
         NUCLEATION_DURATION_MINUTES, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: Max {:.2} A/cm2, {:.2} mA, Ramp {:.2} mA/ms, Term {:.1} Ω \nInsert {:.1} RPM, Retract {:.1} RPM, ", 
+    println!("Elongate: Max {:.2} A/cm2, {:.2} mA, Ramp {:.6} mA/ms, Term {:.1} Ω \nInsert {:.1} RPM, Retract {:.1} RPM, ", 
         MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, RAMP_RANGE_MA_PER_MS, CYCLIC_TERMINATION_OHMS,
         SMC05_INSERTION_RATE_RPM,  SMC05_WITHDRAWAL_RATE_RPM,
         );
