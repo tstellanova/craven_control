@@ -74,24 +74,26 @@ const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
 // const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*2.0  + std::f32::consts::PI*1.0*1.0; // A dipped tip about 2 mm OD, 2 mm long, plus end cap
 // const ELECTRODE_SURFACE_MM2:f32 = 5. * 5.; // rectangular tip about 5 mm by 5 mm 
 // const ELECTRODE_SURFACE_MM2:f32 = 100.; // 1 cm2: arbitrary, derived from prior 30 mm tip dip experiments
-const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(5.*5.); // Approximate area of disk about 5 mm radius
+pub const CATHODE_SA_8MM_DISC_MM2:f32 = std::f32::consts::PI*(7.*7.); // Approximate area of disc about 8 mm radius
 
-const ELECTRODE_SURFACE_CM2: f32 = ELECTRODE_SURFACE_MM2 / 100.;
+const CATHODE_SURFACE_AREA_MM2:f32 = CATHODE_SA_8MM_DISC_MM2;
+const CATHODE_SURFACE_AREA_CM2: f32 = CATHODE_SURFACE_AREA_MM2 / 100.;
 
 /// Ideal current density for growing elongated CNTs from the nucleation sites
-const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 1.0; 
-const MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.5; 
+const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.6; 
+const MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4; 
 
-const NOM_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
+const NOM_ELONGATION_CURRENT_MA:f32 = CATHODE_SURFACE_AREA_CM2 * MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
 /// Maximum allowed current density during Cyclic growth phase
 const MAX_ELONGATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_ELONGATION_CURRENT_MA);
 const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
-const MIN_ELONGATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
-const ELONGATION_RESET_CURRENT_MA: f32 = 2.;
+const MIN_ELONGATION_CURRENT_MA:f32 = CATHODE_SURFACE_AREA_CM2 * MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
+// Used at beginning of elongation cycle to "reset" ion flow briefly
+const ELONGATION_RESET_CURRENT_MA: f32 = 5.;
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
 const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.04; 
-const NOM_NUCLEATION_CURRENT_MA:f32 = ELECTRODE_SURFACE_CM2 * NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.;
+const NOM_NUCLEATION_CURRENT_MA:f32 = CATHODE_SURFACE_AREA_CM2 * NUCLEATION_CURRENT_DENSITY_AMPS_CM2 * 1000.;
 /// Maximum allowed current density during Nucleation phase
 const MAX_NUCLEATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_NUCLEATION_CURRENT_MA);
 
@@ -111,7 +113,7 @@ const CYCLIC_LOWV_DURATION_MS: u64 = 20*1000;
 const CYCLIC_PERIOD_MS: u64 = CYCLIC_LOWV_DURATION_MS + CYCLIC_HIGHV_DURATION_MS;
 
 /// The period over which to cycle the driving voltage / current supplied during Elongation
-const ELONGATION_CYCLE_PERIOD_MS: u64 = 3 * 60 * 1000;
+const ELONGATION_CYCLE_PERIOD_MS: u64 = 2 * 60 * 1000;
 /// The the modulo remainder of elongation cycle period at which we reset the voltage cycle
 const ELONGATION_CYCLE_RESET_MS: u64 = 2000;
 
@@ -741,12 +743,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Furnace target {:.1} °C  cut-in {:.1} °C cut-out {:.1} °C excessive  {:.1} °C",
         ELECTROLYTE_TARGET_TEMP_C, CUT_IN_ABOVE_TARGET_TEMP_C, CUT_OUT_ABOVE_TARGET_TEMP_C, EXCESSIVE_HEAT_TEMP_C);
-    println!("Cathode area: {:.2} cm2 ({:.2} mm2)", ELECTRODE_SURFACE_CM2, ELECTRODE_SURFACE_MM2);
-    println!("Warmup {} mA ; Holding {} mA", WARMUP_CURRENT_MA, HOLDING_PROBE_CURRENT_MA);
+    println!("Cathode area: {:.2} cm2 ({:.2} mm2)", CATHODE_SURFACE_AREA_CM2, CATHODE_SURFACE_AREA_MM2);
+    println!("Warmup {:.1} mA ; Holding {:.1} mA", WARMUP_CURRENT_MA, HOLDING_PROBE_CURRENT_MA);
     println!("Nucleate {} minutes , {:.2} A/cm2, {:.2} mA max", 
         NUCLEATION_DURATION_MINUTES, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: Max {:.2} A/cm2, {:.2} mA, Ramp {:.6} mA/ms, Term {:.1} Ω \nInsert {:.1} RPM, Retract {:.1} RPM, ", 
-        MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, RAMP_RANGE_MA_PER_MS, CYCLIC_TERMINATION_OHMS,
+    println!("Elongate: Max {:.2} A/cm2, {:.2} mA, Ramp {:.6} mA/ms, Period {}, Term {:.1} Ω \nInsert {:.1} RPM, Retract {:.1} RPM, ", 
+        MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, RAMP_RANGE_MA_PER_MS, ELONGATION_CYCLE_PERIOD_MS, CYCLIC_TERMINATION_OHMS,
         SMC05_INSERTION_RATE_RPM,  SMC05_WITHDRAWAL_RATE_RPM,
         );
     println!("Dipper insertion duration: {} ms, detect current ratio {:.2} ", INSERTION_DURATION_MS, SURFACE_CONTACT_THRESHOLD_RATIO);
