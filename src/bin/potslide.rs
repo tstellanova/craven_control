@@ -74,13 +74,18 @@ const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
 // const ELECTRODE_SURFACE_MM2:f32 = std::f32::consts::PI*(2.0)*2.0  + std::f32::consts::PI*1.0*1.0; // A dipped tip about 2 mm OD, 2 mm long, plus end cap
 // const ELECTRODE_SURFACE_MM2:f32 = 5. * 5.; // rectangular tip about 5 mm by 5 mm 
 // const ELECTRODE_SURFACE_MM2:f32 = 100.; // 1 cm2: arbitrary, derived from prior 30 mm tip dip experiments
-pub const CATHODE_SA_8MM_DISC_MM2:f32 = std::f32::consts::PI*(7.*7.); // Approximate area of disc about 8 mm radius
 
-const CATHODE_SURFACE_AREA_MM2:f32 = CATHODE_SA_8MM_DISC_MM2;
+/// Approximate radius of flat spiral disc cathode
+pub const FLAT_SPIRAL_DISC_RADIUS_MM:f32 = 3.5;
+
+/// Estimated surface area of flat spiral disc cathode 
+pub const CATHODE_SA_FLAT_SPIRAL_DISC_MM2:f32 = std::f32::consts::PI*(FLAT_SPIRAL_DISC_RADIUS_MM*FLAT_SPIRAL_DISC_RADIUS_MM); 
+
+const CATHODE_SURFACE_AREA_MM2:f32 = CATHODE_SA_FLAT_SPIRAL_DISC_MM2;
 const CATHODE_SURFACE_AREA_CM2: f32 = CATHODE_SURFACE_AREA_MM2 / 100.;
 
-/// Ideal current density for growing elongated CNTs from the nucleation sites
-const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.6; 
+/// Maximum current density for growing elongated CNTs from the nucleation sites
+const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.8; 
 const MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4; 
 
 const NOM_ELONGATION_CURRENT_MA:f32 = CATHODE_SURFACE_AREA_CM2 * MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
@@ -88,7 +93,8 @@ const NOM_ELONGATION_CURRENT_MA:f32 = CATHODE_SURFACE_AREA_CM2 * MAX_ELONGATION_
 const MAX_ELONGATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_ELONGATION_CURRENT_MA);
 const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 const MIN_ELONGATION_CURRENT_MA:f32 = CATHODE_SURFACE_AREA_CM2 * MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
-// Used at beginning of elongation cycle to "reset" ion flow briefly
+
+/// Used at beginning of elongation cycle to "reset" ion flow briefly
 const ELONGATION_RESET_CURRENT_MA: f32 = 5.;
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
