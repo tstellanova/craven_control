@@ -118,6 +118,13 @@ const CYCLIC_LOWV_DURATION_MS: u64 = 20*1000;
 /// Total duration of the combined high/low Cyclic phase drive cycle
 const CYCLIC_PERIOD_MS: u64 = CYCLIC_LOWV_DURATION_MS + CYCLIC_HIGHV_DURATION_MS;
 
+const NUM_CYCVA_SUB_SEGMENTS: u64 = 12;
+const CYCVA_SEGMENT_DURATION_MS: u64 = 5 * 60 * 1000;
+const CYCVA_SWITCH_PERIOD_MS: u64 = CYCVA_SEGMENT_DURATION_MS / 2;
+// const CYCVA_LONG_PERIOD_MS: u64 = CYCVA_SHORT_PERIOD_MS * NUM_CYCVA_SUB_SEGMENTS ;
+const MAX_CYCVA_VOLTS: f32 = 5.0;
+const CYCVA_SEGMENT_BASE_INCR_VOLTS: f32 = MAX_CYCVA_VOLTS / (NUM_CYCVA_SUB_SEGMENTS as f32);
+
 /// The period over which to cycle the driving voltage / current supplied during Elongation
 const ELONGATION_CYCLE_PERIOD_MS: u64 = 2 * 60 * 1000;
 /// The the modulo remainder of elongation cycle period at which we reset the voltage cycle
@@ -140,6 +147,8 @@ const HOLDING_PROBE_CURRENT_MA: f32 = 2. * MIN_DRIVE_CURRENT_INCR_MA;
 const WARMUP_CURRENT_MA: f32 =  4. * MIN_DRIVE_CURRENT_INCR_MA;
 /// Fall back to this current value during Elongation drive phase when resistance is unknown.
 const ELONGATION_PHASE_FALLBACK_MA: f32 = MID_ELONGATION_CURRENT_MA;
+
+const STEPPED_CYCVA_FALLBACK_MA: f32 = 30.;
 
 /// Weighting alpha for Exponential Weighted Moving Average of resistance
 const RESISTANCE_EWMA_ALPHA: f32 = 0.4;
@@ -187,12 +196,14 @@ enum DrivePhase {
     Fresh = 0,
     /// Check that the electrode is immersed in conductive melt
     Warmup = 1, 
+    /// Stepped cyclic voltammetry -- triangular potential ramp, with increasing switching potential
+    SteppedVoltammetry = 2,
     /// Establishing nucleation sites on the cathode
-    Nucleation = 2,
+    Nucleation = 3,
     /// Alternating measure/grow cycle
-    Elongation = 3,
+    Elongation = 4,
     /// Monitor the inter-electrode conductivity
-    Holding = 4, 
+    Holding = 5, 
     /// Number of drive phases
     Max,
 } 
@@ -445,6 +456,7 @@ async fn drive_current_and_measure(ctx: &mut tokio_modbus::client::Context,
             (1000. * measured_volts) / measured_milliamps 
         }
         else {
+            println!("measured: {:0.3} mA  {:0.2} V", measured_milliamps, measured_volts);
             INF_INTER_ELECTRODE_OHMS // arbitrary value based on previous experiments
         };
 
@@ -479,6 +491,24 @@ async fn trans_nucleation_phase(ctx: &mut tokio_modbus::client::Context, state: 
         state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
     );
     Ok(MAX_NUCLEATION_CURRENT_MA)
+}
+
+// Transition to SteppedVoltammetry phase
+async fn trans_stepped_voltammetry_phase(ctx: &mut tokio_modbus::client::Context, state: &mut ElectrodeState, trans_utc_ms: i64, prior_duration_ms: u64)
+-> Result<f32, Box<dyn std::error::Error>> 
+{
+    state.drive_phase = DrivePhase::SteppedVoltammetry;
+    state.phase_start_ms = trans_utc_ms;
+    state.phase_starts_utc_ms[DrivePhase::Elongation as usize] = trans_utc_ms;
+    if !state.dipper_state.dipper_enabled {
+        disable_dipper_motion(ctx, &mut state.dipper_state).await?;
+    }
+    println!("{} start SteppedVoltammetry phase w/Rewma {:.2} min {:.2} max {:.2} Ohms ({} ms)", 
+        trans_utc_ms, 
+        state.ohms_ewma, state.lowv_minr_ohms, state.max_ohms_ewma, 
+        prior_duration_ms
+    );
+    Ok(STEPPED_CYCVA_FALLBACK_MA)
 }
 
 /// Transition to Elongation drive phase
@@ -610,6 +640,19 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             }
             // println!("Warmup: {} sec {:.1} Ω", phase_duration_ms/1000, state.measured_ohms);
         }
+         DrivePhase::SteppedVoltammetry => {
+            // set_all_anode_connections(&mut state.anode_connections, true);
+            let ideal_volts = stepped_cycva_voltage_at_time_ms(phase_duration_ms);
+            let ideal_drive_ma =   //    1000. * (ideal_volts / state.ohms_ewma);        
+                if ohms_ewma_valid { 
+                     1000. * (ideal_volts / measured_ohms)
+                }
+                else { STEPPED_CYCVA_FALLBACK_MA };
+            println!("ideal_v: {:0.3} V drive_ma: {:0.3} mA", ideal_volts, ideal_drive_ma);
+
+            new_drive_ma =  f32::max(ideal_drive_ma, 4.0);
+
+        }
         DrivePhase::Nucleation => {
             new_drive_ma = MAX_NUCLEATION_CURRENT_MA;
             set_all_anode_connections(&mut state.anode_connections, true);
@@ -618,6 +661,7 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 trans_elongation_phase(ctx, state, after_drive_utc_ms, phase_duration_ms).await?;
             } 
         }
+
         DrivePhase::Elongation => {
             // anode_connections_at_time_ms(phase_duration_ms, state);
             set_all_anode_connections(&mut state.anode_connections, true);
@@ -677,6 +721,29 @@ pub fn cyclic_voltage_at_time_ms(phase_duration_ms: u64) -> f32
         // end with HIGHV drive on each cycle
         CYCLIC_GROWTH_PEAK_V
     }
+}
+
+///
+/// Calculate the ideal driving potential at a time in milliseconds since the
+/// start of the Stepped Cyclic phase
+pub fn stepped_cycva_voltage_at_time_ms(phase_duration_ms: u64) -> f32 
+{
+    let segment_number =  1 + (phase_duration_ms / CYCVA_SEGMENT_DURATION_MS);
+    let segment_progress_ms: u64 = phase_duration_ms % CYCVA_SEGMENT_DURATION_MS;
+    let segment_max_voltage = CYCVA_SEGMENT_BASE_INCR_VOLTS * (segment_number as f32);
+
+    let initial_ideal_volts = 
+        if segment_progress_ms < CYCVA_SWITCH_PERIOD_MS {
+            let time_frac = (segment_progress_ms as f32) / (CYCVA_SWITCH_PERIOD_MS as f32);
+            0.8 + segment_max_voltage * time_frac
+        }
+        else {
+            let time_frac = ((segment_progress_ms-CYCVA_SWITCH_PERIOD_MS) as f32) / (CYCVA_SWITCH_PERIOD_MS as f32);
+            0.8 + segment_max_voltage * ( 1. - time_frac)
+        };
+
+    initial_ideal_volts
+
 }
 
 /// Calculate what the driving current should be during the Elongation phase
@@ -812,6 +879,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "w" | "warmup" => {
                                 trans_warmup_phase(&mut ctx, &mut electrode_state, current_utc_ms).await?;
                             },
+                            "c" | "cyclic" => {
+                                trans_stepped_voltammetry_phase(&mut ctx, &mut electrode_state, current_utc_ms, 0).await?;
+                            }
                             "n" | "nucleate" => {
                                 trans_nucleation_phase(&mut ctx, &mut electrode_state, current_utc_ms).await?;
                             }
