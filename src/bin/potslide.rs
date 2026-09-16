@@ -78,7 +78,7 @@ const MAX_DRIVE_CURRENT_MA: f32 = 950.;
 /// Approximate radius of a simple rod cathode
 pub const SIMPLE_ROD_CATHODE_RADIUS_MM:f32 = 1.0;
 /// Approximate submerged length of simple rod cathode
-pub const SIMPLE_ROD_CATHODE_SUBMERGED_LEN_MM:f32 = 5.;
+pub const SIMPLE_ROD_CATHODE_SUBMERGED_LEN_MM:f32 = 10.;
 pub const CATHODE_SA_SIMPLE_ROD_MM2:f32 = 2.*std::f32::consts::PI*SIMPLE_ROD_CATHODE_RADIUS_MM * SIMPLE_ROD_CATHODE_SUBMERGED_LEN_MM;
 
 /// Approximate radius of flat spiral disc cathode
@@ -671,7 +671,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
         DrivePhase::Elongation => {
             // anode_connections_at_time_ms(phase_duration_ms, state);
             set_all_anode_connections(&mut state.anode_connections, true);
-            new_drive_ma = elongation_current_ma_at_time_ms(phase_duration_ms);
+            // new_drive_ma = elongation_current_ma_at_time_ms(phase_duration_ms);
+            new_drive_ma = MAX_ELONGATION_CURRENT_MA;
 
             if ohms_ewma_valid {
                 // check for cyclic growth termination condition
