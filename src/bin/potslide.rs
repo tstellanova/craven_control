@@ -49,7 +49,7 @@ const PROBE_CHECK_TEMP_C:f32 = 600.;
 /// Temp we expect to see when probe is succesfully inserted into melt
 const PROBE_INSERTED_TEMP_C:f32 = 650.;
 /// The center temperature we are trying to achieve for the electrolyte melt
-const ELECTROLYTE_TARGET_TEMP_C:f32 = 770.;
+const ELECTROLYTE_TARGET_TEMP_C:f32 = 767.;
 /// Below this temperature we don't drive start driving current through the electrodes.
 const MIN_ELECTRODE_CHECK_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C - 12.;
 /// The temperature at which the heater should cut in (turn on)
@@ -66,7 +66,7 @@ const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + EXCESSIVE_HEAT_DEL
 const CYCLIC_TERMINATION_OHMS: f32 = 0.5;
 
 /// Limit of the current supply
-const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
+const MAX_DRIVE_CURRENT_MA: f32 = 950.;
 
 /// Pre-estimated surface area of electrode probe (in this case, the area of the cathode)
 // const ELECTRODE_SURFACE_MM2:f32 = f32::consts::PI*(1.0)*30.; // Approximate area of twisted pair of 1 mm diameter, about 30 mm long
@@ -75,17 +75,23 @@ const MAX_DRIVE_CURRENT_MA: f32 = 1000.;
 // const ELECTRODE_SURFACE_MM2:f32 = 5. * 5.; // rectangular tip about 5 mm by 5 mm 
 // const ELECTRODE_SURFACE_MM2:f32 = 100.; // 1 cm2: arbitrary, derived from prior 30 mm tip dip experiments
 
+/// Approximate radius of a simple rod cathode
+pub const SIMPLE_ROD_CATHODE_RADIUS_MM:f32 = 1.0;
+/// Approximate submerged length of simple rod cathode
+pub const SIMPLE_ROD_CATHODE_SUBMERGED_LEN_MM:f32 = 5.;
+pub const CATHODE_SA_SIMPLE_ROD_MM2:f32 = 2.*std::f32::consts::PI*SIMPLE_ROD_CATHODE_RADIUS_MM * SIMPLE_ROD_CATHODE_SUBMERGED_LEN_MM;
+
 /// Approximate radius of flat spiral disc cathode
 pub const FLAT_SPIRAL_DISC_RADIUS_MM:f32 = 3.5;
 
 /// Estimated surface area of flat spiral disc cathode 
 pub const CATHODE_SA_FLAT_SPIRAL_DISC_MM2:f32 = std::f32::consts::PI*(FLAT_SPIRAL_DISC_RADIUS_MM*FLAT_SPIRAL_DISC_RADIUS_MM); 
 
-const CATHODE_SURFACE_AREA_MM2:f32 = CATHODE_SA_FLAT_SPIRAL_DISC_MM2;
+const CATHODE_SURFACE_AREA_MM2:f32 = CATHODE_SA_SIMPLE_ROD_MM2; //CATHODE_SA_FLAT_SPIRAL_DISC_MM2;
 const CATHODE_SURFACE_AREA_CM2: f32 = CATHODE_SURFACE_AREA_MM2 / 100.;
 
 /// Maximum current density for growing elongated CNTs from the nucleation sites
-const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.8; 
+const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 1.0; 
 const MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4; 
 
 const NOM_ELONGATION_CURRENT_MA:f32 = CATHODE_SURFACE_AREA_CM2 * MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
@@ -95,7 +101,7 @@ const MID_ELONGATION_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 2.;
 const MIN_ELONGATION_CURRENT_MA:f32 = CATHODE_SURFACE_AREA_CM2 * MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
 
 /// Used at beginning of elongation cycle to "reset" ion flow briefly
-const ELONGATION_RESET_CURRENT_MA: f32 = 5.;
+const ELONGATION_RESET_CURRENT_MA: f32 = 4.;
 
 /// Ideal current density for establishing nucleation sites on the cathode surface
 const NUCLEATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.04; 
@@ -126,7 +132,7 @@ const MAX_CYCVA_VOLTS: f32 = 5.0;
 const CYCVA_SEGMENT_BASE_INCR_VOLTS: f32 = MAX_CYCVA_VOLTS / (NUM_CYCVA_SUB_SEGMENTS as f32);
 
 /// The period over which to cycle the driving voltage / current supplied during Elongation
-const ELONGATION_CYCLE_PERIOD_MS: u64 = 2 * 60 * 1000;
+const ELONGATION_CYCLE_PERIOD_MS: u64 = 60 * 1000;
 /// The the modulo remainder of elongation cycle period at which we reset the voltage cycle
 const ELONGATION_CYCLE_RESET_MS: u64 = 2000;
 
