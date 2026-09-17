@@ -225,6 +225,16 @@ pub async fn disable_dipper_motion(ctx: &mut tokio_modbus::client::Context, stat
 }
 
 
+pub async fn pulse_dipper_withdrawal(ctx: &mut tokio_modbus::client::Context, pulse_duration_ms: u64)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    set_rev_speed(ctx, SMC05_WITHDRAWAL_RATE_RPM).await?;
+    start_smc05_rev_rotation(ctx).await?;
+    sleep(Duration::from_millis(pulse_duration_ms)).await;
+    stop_smc05_rotation(ctx).await?;
+    Ok(())
+}
+
 pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>> 
 {

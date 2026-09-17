@@ -42,6 +42,13 @@ const NUCLEATION_DURATION_MINUTES: u64 = 5;
 const NUCLEATION_DURATION_SEC: u64 = NUCLEATION_DURATION_MINUTES*60;
 const NUCLEATION_DURATION_MS: u64 = NUCLEATION_DURATION_SEC*1000;
 
+
+/// Time to wait before transitioning to recatalyze phase
+const ELONGATION_CYCLE_DURATION_MS: u64 = 2 * ELONGATION_CYCLE_PERIOD_MS ;
+
+/// How long to run Recatalyze phase
+const RECATALYZE_DURATION_MS: u64 = ELONGATION_CYCLE_PERIOD_MS;
+
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
 /// Temp at which we attempt to submerge thermo probes in electrolyte melt
@@ -109,6 +116,7 @@ const NOM_NUCLEATION_CURRENT_MA:f32 = CATHODE_SURFACE_AREA_CM2 * NUCLEATION_CURR
 /// Maximum allowed current density during Nucleation phase
 const MAX_NUCLEATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_NUCLEATION_CURRENT_MA);
 
+const RECATALYZE_CURRENT_MA:f32 = MAX_NUCLEATION_CURRENT_MA;
 
 /// Highest possible voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
 const CYCLIC_GROWTH_PEAK_V: f32 = 3.2;
@@ -206,10 +214,12 @@ enum DrivePhase {
     SteppedVoltammetry = 2,
     /// Establishing nucleation sites on the cathode
     Nucleation = 3,
-    /// Alternating measure/grow cycle
+    /// Growth phase
     Elongation = 4,
+    /// Retract cathode and re-establish catalyst sites
+    Recatalyze = 5,
     /// Monitor the inter-electrode conductivity
-    Holding = 5, 
+    Holding = 6, 
     /// Number of drive phases
     Max,
 } 
@@ -475,7 +485,7 @@ async fn trans_warmup_phase(ctx: &mut tokio_modbus::client::Context, state: &mut
 {
     state.drive_phase = DrivePhase::Warmup;
     state.phase_start_ms = trans_utc_ms;
-    state.phase_starts_utc_ms[DrivePhase::Warmup as usize] = trans_utc_ms;
+    state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
     reset_dipper_move_rates(ctx).await?;
     disable_dipper_motion(ctx, &mut state.dipper_state).await?;
     println!("{} start Warmup phase", 
@@ -490,7 +500,7 @@ async fn trans_nucleation_phase(ctx: &mut tokio_modbus::client::Context, state: 
 {
     state.drive_phase = DrivePhase::Nucleation;
     state.phase_start_ms = trans_utc_ms;
-    state.phase_starts_utc_ms[DrivePhase::Nucleation as usize] = trans_utc_ms;
+    state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
     disable_dipper_motion(ctx, &mut state.dipper_state).await?;
     println!("{} start Nucleation phase w/Rewma {:.2} min {:.2} max {:.2} Ohms", 
         trans_utc_ms, 
@@ -499,13 +509,29 @@ async fn trans_nucleation_phase(ctx: &mut tokio_modbus::client::Context, state: 
     Ok(MAX_NUCLEATION_CURRENT_MA)
 }
 
+/// Transition to Recatalyze drive phase
+async fn trans_recatalyze_phase(ctx: &mut tokio_modbus::client::Context, state: &mut ElectrodeState, trans_utc_ms: i64)
+-> Result<f32, Box<dyn std::error::Error>> 
+{
+    state.drive_phase = DrivePhase::Recatalyze;
+    state.phase_start_ms = trans_utc_ms;
+    state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
+    // set slow withdrawal speed and withdraw very briefly
+    setup_cathode_surface_probe(ctx).await?;
+    pulse_dipper_withdrawal(ctx, 1000).await?;
+    println!("{} start Recatalyze phase w/Rewma {:.2} Ohms", 
+        trans_utc_ms, 
+        state.ohms_ewma, 
+    );
+    Ok(RECATALYZE_CURRENT_MA)
+}
 // Transition to SteppedVoltammetry phase
 async fn trans_stepped_voltammetry_phase(ctx: &mut tokio_modbus::client::Context, state: &mut ElectrodeState, trans_utc_ms: i64, prior_duration_ms: u64)
 -> Result<f32, Box<dyn std::error::Error>> 
 {
     state.drive_phase = DrivePhase::SteppedVoltammetry;
     state.phase_start_ms = trans_utc_ms;
-    state.phase_starts_utc_ms[DrivePhase::Elongation as usize] = trans_utc_ms;
+    state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
     if !state.dipper_state.dipper_enabled {
         disable_dipper_motion(ctx, &mut state.dipper_state).await?;
     }
@@ -523,7 +549,7 @@ async fn trans_elongation_phase(ctx: &mut tokio_modbus::client::Context, state: 
 {
     state.drive_phase = DrivePhase::Elongation;
     state.phase_start_ms = trans_utc_ms;
-    state.phase_starts_utc_ms[DrivePhase::Elongation as usize] = trans_utc_ms;
+    state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
     if !state.dipper_state.dipper_enabled {
         disable_dipper_motion(ctx, &mut state.dipper_state).await?;
     }
@@ -541,7 +567,7 @@ async fn trans_holding_phase(ctx: &mut tokio_modbus::client::Context, state: &mu
 {
     state.drive_phase = DrivePhase::Holding;
     state.phase_start_ms = trans_utc_ms;
-    state.phase_starts_utc_ms[DrivePhase::Holding as usize] = trans_utc_ms;
+    state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
 
     disable_dipper_motion(ctx, &mut state.dipper_state).await?;
     reset_dipper_move_rates(ctx).await?;
@@ -667,7 +693,6 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                 trans_elongation_phase(ctx, state, after_drive_utc_ms, phase_duration_ms).await?;
             } 
         }
-
         DrivePhase::Elongation => {
             // anode_connections_at_time_ms(phase_duration_ms, state);
             set_all_anode_connections(&mut state.anode_connections, true);
@@ -688,9 +713,20 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                                 after_drive_utc_ms,
                                 phase_duration_ms).await?;
                     }
+                    else if phase_duration_ms > ELONGATION_CYCLE_DURATION_MS {
+                        new_drive_ma = trans_recatalyze_phase(ctx, state, after_drive_utc_ms).await?;
+                    }
                 }
             }
 
+        }
+        DrivePhase::Recatalyze => {
+            new_drive_ma = MAX_NUCLEATION_CURRENT_MA;
+            set_all_anode_connections(&mut state.anode_connections, true);
+
+            if phase_duration_ms > RECATALYZE_DURATION_MS  {
+                trans_elongation_phase(ctx, state, after_drive_utc_ms, phase_duration_ms).await?;
+            } 
         }
         DrivePhase::Holding => {
             set_all_anode_connections(&mut state.anode_connections, true);
@@ -754,7 +790,7 @@ pub fn stepped_cycva_voltage_at_time_ms(phase_duration_ms: u64) -> f32
 }
 
 /// Calculate what the driving current should be during the Elongation phase
-fn elongation_current_ma_at_time_ms(phase_duration_ms: u64) -> f32 
+pub fn elongation_current_ma_at_time_ms(phase_duration_ms: u64) -> f32 
 {
     let time_since_cycle_start_ms: u64 = phase_duration_ms % ELONGATION_CYCLE_PERIOD_MS;
     let ideal_current_ma = 
