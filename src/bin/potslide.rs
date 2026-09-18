@@ -517,7 +517,7 @@ async fn trans_recatalyze_phase(ctx: &mut tokio_modbus::client::Context, state: 
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
     // set slow withdrawal speed and withdraw very briefly
-    setup_cathode_surface_probe(ctx).await?;
+    setup_pulsed_position_control(ctx, SMC05_INSERTION_RATE_RPM, SMC05_WITHDRAWAL_RATE_RPM).await?;
     pulse_dipper_withdrawal(ctx, 1000).await?;
     println!("{} start Recatalyze phase w/Rewma {:.2} Ohms", 
         trans_utc_ms, 

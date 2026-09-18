@@ -225,16 +225,6 @@ pub async fn disable_dipper_motion(ctx: &mut tokio_modbus::client::Context, stat
 }
 
 
-pub async fn pulse_dipper_withdrawal(ctx: &mut tokio_modbus::client::Context, pulse_duration_ms: u64)
--> Result<(), Box<dyn std::error::Error>> 
-{
-    set_rev_speed(ctx, SMC05_WITHDRAWAL_RATE_RPM).await?;
-    start_smc05_rev_rotation(ctx).await?;
-    sleep(Duration::from_millis(pulse_duration_ms)).await;
-    stop_smc05_rotation(ctx).await?;
-    Ok(())
-}
-
 pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
@@ -247,6 +237,42 @@ pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context
     set_rev_speed(ctx, SMC05_WITHDRAWAL_RATE_RPM).await?;
     report_smc05_system_config(ctx).await?;
 
+    Ok(())
+}
+
+///
+/// Configure dipper for pulsed movement
+pub async fn setup_pulsed_position_control(ctx: &mut tokio_modbus::client::Context, insert_rate_rpm: f32, withdraw_rate_rpm: f32) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    enable_sport_mode03(ctx).await?;
+    stop_smc05_rotation(ctx).await?;
+
+    // configure for surface contact probing
+    report_smc05_system_config(ctx).await?;
+    set_fwd_speed(ctx, insert_rate_rpm).await?;
+    set_rev_speed(ctx, withdraw_rate_rpm).await?;
+    report_smc05_system_config(ctx).await?;
+    Ok(())
+}
+
+/// Withdraw the dipper slightly from the melt 
+pub async fn pulse_dipper_withdrawal(ctx: &mut tokio_modbus::client::Context, pulse_duration_ms: u64)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    start_smc05_rev_rotation(ctx).await?;
+    sleep(Duration::from_millis(pulse_duration_ms)).await;
+    stop_smc05_rotation(ctx).await?;
+    Ok(())
+}
+
+/// Insert the dipper slightly into the melt
+pub async fn pulse_dipper_insertion(ctx: &mut tokio_modbus::client::Context, pulse_duration_ms: u64)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    start_smc05_fwd_rotation(ctx).await?;
+    sleep(Duration::from_millis(pulse_duration_ms)).await;
+    stop_smc05_rotation(ctx).await?;
     Ok(())
 }
 
