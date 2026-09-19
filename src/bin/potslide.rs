@@ -762,8 +762,9 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             //Read the current motor movement direction:
             // If it's reverse (withdrawing) then set high current,
             // If it's forward (inserting) then set low current
-            let (op_status, motor_direction, pulse_count, action_count) = 
-                read_stepper_driver_status(ctx).await?; 
+            let (op_status, motor_direction) = 
+                report_smc05_motor_status(ctx).await?;
+                // read_stepper_driver_status(ctx).await?; 
             if op_status == SMC05_MOTION_STATUS_CONSTANT_SPEED {
                 if motor_direction == SMC05_ROTATION_DIR_REV {
                     new_drive_ma = MAX_ELONGATION_CURRENT_MA;
