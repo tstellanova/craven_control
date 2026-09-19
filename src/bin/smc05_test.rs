@@ -1,3 +1,4 @@
+use std::eprintln;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -94,8 +95,8 @@ pub async fn sport_modes_test(ctx: &mut tokio_modbus::client::Context) -> Result
 /// Test slow insert, fast withdrawal bouncy mode
 pub async fn bouncy_mode_test(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
 {
-    const PULSE_DIST: u16 = 16000;
-    const NUM_WORK_CYCLES: u16 = 2;
+    const PULSE_DIST: u16 = 16500;
+    const NUM_WORK_CYCLES: u16 = 3;
 
     let (op_status, motion_direction, pulse_count, action_count) = setup_bouncy_mode(ctx, 
         SMC05_XSLOW_MOVE_RATE_RPM, SMC05_MEDIUM_MOVE_RATE_RPM, 
@@ -104,6 +105,7 @@ pub async fn bouncy_mode_test(ctx: &mut tokio_modbus::client::Context) -> Result
     ).await?;
     println!("op_status {}, motor_direction {}, pulse_count {}, action_count {}", 
         op_status, motion_direction, pulse_count, action_count);
+    let actions_count_goal = action_count + NUM_WORK_CYCLES;
     start_sport_mode06_sequence(ctx).await?;
 
     let mut prior_action_count = action_count;
@@ -129,7 +131,10 @@ pub async fn bouncy_mode_test(ctx: &mut tokio_modbus::client::Context) -> Result
         sleep(Duration::from_millis(1000)).await;
     }
     stop_smc05_rotation(ctx).await?;
-
+    // verify that we performed the number of cycles intended
+    if actions_count_goal != action_count {
+        eprintln!("End actions count {action_count} != actions_count_goal {actions_count_goal}");
+    }
     Ok(())
 }
  /// Set the output drive current of the test electrodes 
