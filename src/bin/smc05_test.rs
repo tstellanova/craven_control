@@ -95,23 +95,29 @@ pub async fn sport_modes_test(ctx: &mut tokio_modbus::client::Context) -> Result
 /// Test slow insert, fast withdrawal bouncy mode
 pub async fn bouncy_mode_test(ctx: &mut tokio_modbus::client::Context) -> Result<(), Box<dyn std::error::Error>> 
 {
-    const PULSE_DIST: u16 = 16500;
+    const PULSE_DIST: u16 = (16000. * 1.25) as u16;
     const NUM_WORK_CYCLES: u16 = 3;
-
-    let (op_status, motion_direction, pulse_count, action_count) = setup_bouncy_mode(ctx, 
-        SMC05_XSLOW_MOVE_RATE_RPM, SMC05_MEDIUM_MOVE_RATE_RPM, 
-        PULSE_DIST, PULSE_DIST,
-        NUM_WORK_CYCLES
-    ).await?;
-    println!("op_status {}, motor_direction {}, pulse_count {}, action_count {}", 
-        op_status, motion_direction, pulse_count, action_count);
-    let actions_count_goal = action_count + NUM_WORK_CYCLES;
+    const TEST_FWD_RPM: f32 = 60.;
+    const TEST_REV_RPM: f32 = 120.;
+    
+    println!("PULSE_DIST: {PULSE_DIST} NUM_WORK_CYCLES: {NUM_WORK_CYCLES} TEST_FWD_RPM: {TEST_FWD_RPM} TEST_REV_RPM: {TEST_REV_RPM}");
+    stop_smc05_rotation(ctx).await?;
+    let (op_status, motion_direction, pulse_count, orig_action_count) = 
+        setup_bouncy_mode(ctx, 
+            TEST_FWD_RPM, TEST_REV_RPM, 
+            PULSE_DIST, PULSE_DIST,
+            NUM_WORK_CYCLES
+        ).await?;
+    println!("op_status {}, motor_direction {}, pulse_count {}, orig_action_count {}", 
+        op_status, motion_direction, pulse_count, orig_action_count);
+    let actions_count_goal = orig_action_count + (2*NUM_WORK_CYCLES);
     start_sport_mode06_sequence(ctx).await?;
 
-    let mut prior_action_count = action_count;
+    let mut prior_action_count = orig_action_count;
     let mut prior_op_status = op_status;
     let mut prior_pulse_count = pulse_count;
     loop {
+        let mut finished = false;
         let (op_status, motor_direction, pulse_count, action_count) = 
             read_stepper_driver_status(ctx).await?;
         println!("op_status {}, motor_direction {}, pulse_count {}, action_count {}", 
@@ -120,20 +126,27 @@ pub async fn bouncy_mode_test(ctx: &mut tokio_modbus::client::Context) -> Result
             if prior_action_count == action_count {
                 if prior_pulse_count == pulse_count {
                     println!("bouncy sequence done");
-                    break;
+                    finished = true;
                 }
             }
         }
         prior_action_count = action_count;
         prior_op_status = op_status;
         prior_pulse_count = pulse_count;
-
-        sleep(Duration::from_millis(1000)).await;
+        if finished { break; }
+        else {
+            if prior_op_status == SMC05_MOTION_STATUS_STOPPED {
+                sleep(Duration::from_millis(2000)).await;
+            }
+            else {
+                sleep(Duration::from_millis(1000)).await;
+            }
+        }
     }
     stop_smc05_rotation(ctx).await?;
     // verify that we performed the number of cycles intended
-    if actions_count_goal != action_count {
-        eprintln!("End actions count {action_count} != actions_count_goal {actions_count_goal}");
+    if prior_action_count != actions_count_goal  {
+        eprintln!("End actions count {prior_action_count} != actions_count_goal {actions_count_goal}");
     }
     Ok(())
 }

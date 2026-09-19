@@ -119,7 +119,8 @@ pub async fn start_sport_mode06_sequence(ctx: &mut tokio_modbus::client::Context
 -> Result<(), Box<dyn std::error::Error>> 
 {
     println!("start_sport_mode06_sequence...");
-    send_smc05_start_stop_cmd(ctx).await
+    start_smc05_fwd_rotation(ctx).await
+    // send_smc05_start_stop_cmd(ctx).await
 }
 
 ///
