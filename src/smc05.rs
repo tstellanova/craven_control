@@ -7,11 +7,20 @@ pub const REG_NODEID_SMC05: u16 = 0x0018;
 /// SMC05 action mode, such as stepping forward and back or running a preprogrammed action loop
 pub const REG_SMC05_SPORT_MODE: u16 = 0x0000; 
 
+/// SMC05 number of forward pulses to use in repeated cycles
+pub const REG_SMC05_FWD_PULSES_COUNT: u16 = 0x0001;
+
+/// SMC05 number of forward pulses to use in repeated cycles
+pub const REG_SMC05_REV_PULSES_COUNT: u16 = 0x0004;
+
 /// SMC05 forward rotation speed (Rotations Per Minute)
 pub const REG_SMC05_FWD_RPM: u16 = 0x0003;
 
 /// SMC05 reverse rotation speed (Rotations Per Minute)
 pub const REG_SMC05_REV_RPM: u16 = 0x0006;
+
+/// Number of cycles to repeat in eg sport mode 06
+pub const REG_SMC05_NUM_WORK_CYCLES: u16 = 0x0007;
 
 /// SMC05 Current motor operating status: 0 stop, 1 acceleration, 2 deceleration , 3 uniform speed 
 pub const REG_SMC05_CUR_MOTOR_STATUS:u16  = 0x001A;
@@ -34,10 +43,12 @@ pub const SMC05_MIN_MOVE_RATE_RPM: f32 = 0.1;
 pub const SMC05_XSLOW_MOVE_RATE_RPM: f32 = 5.;
 pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = 60.;
 pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = SMC05_SLOW_MOVE_RATE_RPM * 2.;
-pub const SMC05_INSERTION_RATE_RPM: f32 = 10. * SMC05_XSLOW_MOVE_RATE_RPM;
+
+/// Rate at which we should insert the cathode probe
+pub const SMC05_INSERTION_RATE_RPM: f32 = SMC05_XSLOW_MOVE_RATE_RPM;
 
 /// Very slow rate at which a cathode can be extracted with precision
-pub const SMC05_WITHDRAWAL_RATE_RPM: f32 = SMC05_XSLOW_MOVE_RATE_RPM;
+pub const SMC05_WITHDRAWAL_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM;
 
 
 /// In this "sport mode", run either fwd or rev on command: stop on same command or using start/stop command
@@ -358,6 +369,22 @@ pub async fn set_rev_speed(ctx: &mut tokio_modbus::client::Context, rpm: f32)
     Ok(())
 }
 
+pub async fn set_fwd_pulses_count(ctx: &mut tokio_modbus::client::Context, count: u16)
+    -> Result<(), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+    ctx.write_single_register(REG_SMC05_FWD_PULSES_COUNT, count).await??;
+    Ok(())
+}
+
+pub async fn set_rev_pulses_count(ctx: &mut tokio_modbus::client::Context, count: u16)
+    -> Result<(), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+    ctx.write_single_register(REG_SMC05_REV_PULSES_COUNT, count).await??;
+    Ok(())
+}
+
 ///
 /// Set the sport mode of the SMC05 stepper driver
 /// 
@@ -394,6 +421,25 @@ pub async fn enable_sport_mode06(ctx: &mut tokio_modbus::client::Context,
 
 
 
+///
+/// Configure dipper for pulsed movement
+pub async fn setup_bouncy_mode(ctx: &mut tokio_modbus::client::Context, insert_rate_rpm: f32, withdraw_rate_rpm: f32, insert_pulses: u16, withdraw_pulses:u16) 
+-> Result<(), Box<dyn std::error::Error>> 
+{
+
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+    let (_op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;    
+    stop_smc05_rotation(ctx).await?;
+    set_smc05_sport_mode(ctx, SMC05_SPORT_MODE_06_FWD_REV_LOOP).await?;
+    set_fwd_speed(ctx, insert_rate_rpm).await?;
+    set_rev_speed(ctx, withdraw_rate_rpm).await?;
+
+    set_fwd_pulses_count(ctx, 48000).await?;
+    
+
+    report_smc05_system_config(ctx).await?;
+    Ok(())
+}
 
 
 
