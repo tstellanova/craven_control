@@ -120,7 +120,6 @@ pub async fn start_sport_mode06_sequence(ctx: &mut tokio_modbus::client::Context
 {
     println!("start_sport_mode06_sequence...");
     start_smc05_fwd_rotation(ctx).await
-    // send_smc05_start_stop_cmd(ctx).await
 }
 
 ///

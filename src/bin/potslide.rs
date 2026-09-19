@@ -536,7 +536,11 @@ async fn trans_sync_move_current_phase(ctx: &mut tokio_modbus::client::Context, 
     state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
     // set slow withdrawal speed and withdraw very briefly
     
-    setup_bouncy_mode(ctx, SMC05_INSERTION_RATE_RPM, SMC05_WITHDRAWAL_RATE_RPM, 48000, 48000).await?;
+    const PULSE_DIST: u16 = (16000. * 1.25) as u16; // 1.25 cm / 12.5 mm
+    const NUM_WORK_CYCLES: u16 = 444;
+
+    setup_bouncy_mode(ctx, SMC05_INSERTION_RATE_RPM, SMC05_WITHDRAWAL_RATE_RPM, 
+        PULSE_DIST, PULSE_DIST, NUM_WORK_CYCLES).await?;
     // setup_pulsed_position_control(ctx, SMC05_INSERTION_RATE_RPM, SMC05_WITHDRAWAL_RATE_RPM).await?;
     // pulse_dipper_withdrawal(ctx, 1000).await?;
     start_sport_mode06_sequence(ctx).await?;
@@ -758,7 +762,8 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             //Read the current motor movement direction:
             // If it's reverse (withdrawing) then set high current,
             // If it's forward (inserting) then set low current
-            let (op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?; 
+            let (op_status, motor_direction, pulse_count, action_count) = 
+                read_stepper_driver_status(ctx).await?; 
             if op_status == SMC05_MOTION_STATUS_CONSTANT_SPEED {
                 if motor_direction == SMC05_ROTATION_DIR_REV {
                     new_drive_ma = MAX_ELONGATION_CURRENT_MA;
