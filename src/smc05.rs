@@ -40,9 +40,10 @@ pub const SMC05_MOTION_STATUS_CONSTANT_SPEED: u16 = 3;
 /// Minimum rate at which the motor can move (without stopping)
 pub const SMC05_MIN_MOVE_RATE_RPM: f32 = 0.1;
 
-pub const SMC05_XSLOW_MOVE_RATE_RPM: f32 = 5.;
-pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = 60.;
+pub const SMC05_XSLOW_MOVE_RATE_RPM: f32 = 6.;
+pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = SMC05_XSLOW_MOVE_RATE_RPM * 10.;
 pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = SMC05_SLOW_MOVE_RATE_RPM * 2.;
+pub const SMC05_FAST_MOVE_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM * 10.;
 
 /// Rate at which we should insert the cathode probe
 pub const SMC05_INSERTION_RATE_RPM: f32 = SMC05_XSLOW_MOVE_RATE_RPM;
@@ -100,7 +101,7 @@ impl Default for StepperDriverState {
 
 
 /// # Returns 
-/// (motion_direction, pulse_count, action_count) 
+/// (op_status, motion_direction, pulse_count, action_count) 
 pub async fn read_stepper_driver_status(ctx: &mut tokio_modbus::client::Context)
 -> Result<(u16, u16, u16, u16), Box<dyn std::error::Error>> 
 {
@@ -117,9 +118,13 @@ pub async fn read_stepper_driver_status(ctx: &mut tokio_modbus::client::Context)
 pub async fn start_sport_mode06_sequence(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
+    println!("start_sport_mode06_sequence...");
     send_smc05_start_stop_cmd(ctx).await
 }
 
+///
+/// # Returns:
+/// (op_status, motor_direction)
 pub async fn report_smc05_motor_status(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(u16, u16), Box<dyn std::error::Error>>
 {
@@ -422,23 +427,33 @@ pub async fn enable_sport_mode06(ctx: &mut tokio_modbus::client::Context,
 
 
 ///
-/// Configure dipper for pulsed movement
-pub async fn setup_bouncy_mode(ctx: &mut tokio_modbus::client::Context, insert_rate_rpm: f32, withdraw_rate_rpm: f32, insert_pulses: u16, withdraw_pulses:u16) 
--> Result<(), Box<dyn std::error::Error>> 
+/// Configure dipper for bouncing up and down repeatedly in consistent (pulse) distance
+/// # Returns status after configuration:
+/// (op_status, motion_direction, pulse_count, action_count) 
+pub async fn setup_bouncy_mode(ctx: &mut tokio_modbus::client::Context, 
+    insert_rate_rpm: f32, withdraw_rate_rpm: f32, 
+    insert_pulses: u16, withdraw_pulses:u16,
+    num_work_cycles: u16
+) 
+-> Result<(u16, u16, u16, u16), Box<dyn std::error::Error>> 
 {
 
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
-    let (_op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;    
+    report_smc05_motor_status(ctx).await?;
     stop_smc05_rotation(ctx).await?;
+    report_smc05_system_config(ctx).await?;
+
     set_smc05_sport_mode(ctx, SMC05_SPORT_MODE_06_FWD_REV_LOOP).await?;
     set_fwd_speed(ctx, insert_rate_rpm).await?;
     set_rev_speed(ctx, withdraw_rate_rpm).await?;
 
-    set_fwd_pulses_count(ctx, 48000).await?;
-    
+    set_fwd_pulses_count(ctx, insert_pulses).await?;
+    set_rev_pulses_count(ctx, withdraw_pulses).await?;
+
+    ctx.write_single_register(REG_SMC05_NUM_WORK_CYCLES, num_work_cycles).await??;
 
     report_smc05_system_config(ctx).await?;
-    Ok(())
+    read_stepper_driver_status(ctx).await
 }
 
 
