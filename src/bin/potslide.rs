@@ -645,16 +645,22 @@ fn check_resistance_drop(ohms_ewma_valid: bool,  state: &mut ElectrodeState, che
 {
     let mut should_terminate = false;
     if ohms_ewma_valid {
-        if state.ohms_ewma < state.highv_minr_ohms {
+        if state.measured_ma <= MAX_NUCLEATION_CURRENT_MA && 
+            state.ohms_ewma < state.lowv_minr_ohms {
+            state.lowv_minr_ohms = state.ohms_ewma;
+        }
+        else if state.ohms_ewma < state.highv_minr_ohms {
             println!("{} highv {:.2} V,  HV_MinR -> {:.3} Ω", 
                 check_utc_ms, state.measured_volts, state.ohms_ewma);
             state.highv_minr_ohms = state.ohms_ewma;
             state.highv_minr_update_ms = check_utc_ms;
 
-            // ensure we haven't shorted out growth/anode/cathode
-            if state.ohms_ewma < GROWTH_TERMINATION_OHMS {
-                should_terminate = true;
-            }
+
+        }
+        
+        // ensure we haven't shorted out growth/anode/cathode
+        if state.ohms_ewma < GROWTH_TERMINATION_OHMS {
+            should_terminate = true;
         }
     }
     should_terminate    
@@ -921,8 +927,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Cathode area: {:.2} cm2 ({:.2} mm2)", CATHODE_SURFACE_AREA_CM2, CATHODE_SURFACE_AREA_MM2);
     println!("Warmup {:.1} mA ; Holding {:.1} mA", WARMUP_CURRENT_MA, HOLDING_PROBE_CURRENT_MA);
     println!("Nucleate {} minutes , {:.2} A/cm2, {:.2} mA max", 
-        NUCLEATION_DURATION_MINUTES, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate {} minurtes, Max {:.2} A/cm2, {:.2} mA, Term {:.1} Ω", 
+        NUCLEATION_DURATION_MINUTES, MAX_NUCLEATION_CURRENT_MA, MAX_NUCLEATION_CURRENT_MA);
+    println!("Elongate {} minutes, Max {:.2} A/cm2, {:.2} mA, Term {:.1} Ω", 
         ELONGATION_DURATION_MINUTES, MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, GROWTH_TERMINATION_OHMS);
     println!("SyncMove: PulseDist {}, Insert {:.1} RPM, Retract {:.1} RPM, Term {:.1} Ω", 
         BOUNCE_PULSE_DIST, BOUNCY_INSERTION_RATE_RPM,  BOUNCY_WITHDRAWAL_RATE_RPM, GROWTH_TERMINATION_OHMS );
