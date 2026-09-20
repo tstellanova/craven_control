@@ -230,10 +230,12 @@ pub async fn toggle_dipper_monitor(ctx: &mut tokio_modbus::client::Context, stat
 pub async fn disable_dipper_motion(ctx: &mut tokio_modbus::client::Context, state: &mut StepperDriverState)
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    if state.dipper_last_status_check_ms != 0 || state.dipper_enabled {
-        println!("Stopping dipper motion...");
+    enable_sport_mode03(ctx).await?;
+
+    // if state.dipper_last_status_check_ms != 0 || state.dipper_enabled {
+    //     println!("Stopping dipper motion...");
         stop_smc05_rotation(ctx).await?;
-    }
+    // }
 
     state.dipper_enabled = false;
     state.dipper_last_status_check_ms = 0;

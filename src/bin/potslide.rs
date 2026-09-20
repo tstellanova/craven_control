@@ -243,6 +243,8 @@ async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
     println!("zero_control_outputs...");
     toggle_furnace(ctx, false).await?;
     set_electrode_current_drive(ctx,0.).await?;
+
+    enable_sport_mode03(ctx).await?;
     stop_smc05_rotation(ctx).await?;
 
     // let anode_channels= [false; 4];
@@ -539,7 +541,7 @@ async fn trans_sync_move_current_phase(ctx: &mut tokio_modbus::client::Context, 
     const PULSE_DIST: u16 = (16000. * 1.25) as u16; // 1.25 cm / 12.5 mm
     const NUM_WORK_CYCLES: u16 = 444;
 
-    setup_bouncy_mode(ctx, SMC05_INSERTION_RATE_RPM, SMC05_WITHDRAWAL_RATE_RPM, 
+    setup_bouncy_mode(ctx, SMC05_WITHDRAWAL_RATE_RPM/3., SMC05_WITHDRAWAL_RATE_RPM, 
         PULSE_DIST, PULSE_DIST, NUM_WORK_CYCLES).await?;
     // setup_pulsed_position_control(ctx, SMC05_INSERTION_RATE_RPM, SMC05_WITHDRAWAL_RATE_RPM).await?;
     // pulse_dipper_withdrawal(ctx, 1000).await?;
@@ -743,10 +745,10 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
                     }
                 }
             }
-            if phase_duration_ms > ELONGATION_CYCLE_DURATION_MS 
-                && state.drive_phase != DrivePhase::Holding {
-                new_drive_ma = trans_recatalyze_phase(ctx, state, after_drive_utc_ms).await?;
-            }
+            // if phase_duration_ms > ELONGATION_CYCLE_DURATION_MS 
+            //     && state.drive_phase != DrivePhase::Holding {
+            //     new_drive_ma = trans_recatalyze_phase(ctx, state, after_drive_utc_ms).await?;
+            // }
 
         }
         DrivePhase::Recatalyze => {
