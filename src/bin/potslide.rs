@@ -42,11 +42,13 @@ const NUCLEATION_DURATION_MINUTES: u64 = 5;
 const NUCLEATION_DURATION_SEC: u64 = NUCLEATION_DURATION_MINUTES*60;
 const NUCLEATION_DURATION_MS: u64 = NUCLEATION_DURATION_SEC*1000;
 
-/// Time to wait before transitioning to recatalyze phase
-const ELONGATION_CYCLE_DURATION_MS: u64 = 90000 ;
+/// Time to wait before transitioning out of Elongation phase
+const ELONGATION_DURATION_MINUTES: u64 = 2;
+const ELONGATION_DURATION_SEC: u64 = ELONGATION_DURATION_MINUTES*60;
+const ELONGATION_CYCLE_DURATION_MS: u64 = ELONGATION_DURATION_SEC*1000 ;
 
-/// How long to run Recatalyze phase
-const RECATALYZE_DURATION_MS: u64 = 60000;
+// How long to run Recatalyze phase
+// const RECATALYZE_DURATION_MS: u64 = 60000;
 
 /// Rated maximum temperature of thermocouples (in this case, Type K)
 const MAX_PROBE_TEMP_C:f32 = 1000.;
@@ -69,7 +71,7 @@ const EXCESSIVE_HEAT_TEMP_C:f32 = ELECTROLYTE_TARGET_TEMP_C + EXCESSIVE_HEAT_DEL
 
 
 /// Below this resistance value we terminate the Cyclic phase
-const CYCLIC_TERMINATION_OHMS: f32 = 0.5;
+const GROWTH_TERMINATION_OHMS: f32 = 0.5;
 
 /// Limit of the current supply
 const MAX_DRIVE_CURRENT_MA: f32 = 950.;
@@ -82,9 +84,9 @@ const MAX_DRIVE_CURRENT_MA: f32 = 950.;
 // const ELECTRODE_SURFACE_MM2:f32 = 100.; // 1 cm2: arbitrary, derived from prior 30 mm tip dip experiments
 
 /// Approximate radius of a simple rod cathode
-pub const SIMPLE_ROD_CATHODE_RADIUS_MM:f32 = 0.5;
+pub const SIMPLE_ROD_CATHODE_RADIUS_MM:f32 = 1.0;
 /// Approximate submerged length of simple rod cathode
-pub const SIMPLE_ROD_CATHODE_SUBMERGED_LEN_MM:f32 = 10.;
+pub const SIMPLE_ROD_CATHODE_SUBMERGED_LEN_MM:f32 = 12.5;
 pub const CATHODE_SA_SIMPLE_ROD_MM2:f32 = 2.*std::f32::consts::PI*SIMPLE_ROD_CATHODE_RADIUS_MM * SIMPLE_ROD_CATHODE_SUBMERGED_LEN_MM;
 
 /// Approximate radius of flat spiral disc cathode
@@ -172,6 +174,16 @@ const INSERTION_DURATION_MS: u64 = 1500;
 /// Ratio between the drive current and threshold current to detect whether we've made cathode contact with the electrolyte melt. 
 const SURFACE_CONTACT_THRESHOLD_RATIO: f32 = 2.;
 
+
+/// How far to travel forward and back when dipper is in bouncy mode, in number of pulses
+const BOUNCE_PULSE_DIST: u16 = (16000. * 1.) as u16; // 1 cm / 10 mm bounce
+/// Number of cycles to bounce. 
+const NUM_BOUNCY_WORK_CYCLES: u16 = 888;
+/// Rate at which we should insert the cathode probe
+const BOUNCY_INSERTION_RATE_RPM: f32 = 30.;
+/// Rate at which a cathode can be extracted with precision
+const BOUNCY_WITHDRAWAL_RATE_RPM: f32 = 60.;
+
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
     *ewma = alpha * new_value + (1.0 - alpha) * *ewma;
@@ -216,11 +228,11 @@ enum DrivePhase {
     /// Growth phase
     Elongation = 4,
     /// Retract cathode and re-establish catalyst sites
-    Recatalyze = 5,
+    // Recatalyze = 5,
     /// synchronized immersion/extraction and current
-    SyncMoveCurrent = 6,
+    SyncMoveCurrent = 5,
     /// Monitor the inter-electrode conductivity
-    Holding = 7, 
+    Holding = 6, 
     /// Number of drive phases
     Max,
 } 
@@ -512,22 +524,22 @@ async fn trans_nucleation_phase(ctx: &mut tokio_modbus::client::Context, state: 
     Ok(MAX_NUCLEATION_CURRENT_MA)
 }
 
-/// Transition to Recatalyze drive phase
-async fn trans_recatalyze_phase(ctx: &mut tokio_modbus::client::Context, state: &mut ElectrodeState, trans_utc_ms: i64)
--> Result<f32, Box<dyn std::error::Error>> 
-{
-    state.drive_phase = DrivePhase::Recatalyze;
-    state.phase_start_ms = trans_utc_ms;
-    state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
-    // set slow withdrawal speed and withdraw very briefly
-    setup_pulsed_position_control(ctx, SMC05_INSERTION_RATE_RPM, SMC05_WITHDRAWAL_RATE_RPM).await?;
-    pulse_dipper_withdrawal(ctx, 1000).await?;
-    println!("{} start Recatalyze phase w/Rewma {:.2} Ohms", 
-        trans_utc_ms, 
-        state.ohms_ewma, 
-    );
-    Ok(RECATALYZE_CURRENT_MA)
-}
+// Transition to Recatalyze drive phase
+// async fn trans_recatalyze_phase(ctx: &mut tokio_modbus::client::Context, state: &mut ElectrodeState, trans_utc_ms: i64)
+// -> Result<f32, Box<dyn std::error::Error>> 
+// {
+//     state.drive_phase = DrivePhase::Recatalyze;
+//     state.phase_start_ms = trans_utc_ms;
+//     state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
+//     // set slow withdrawal speed and withdraw very briefly
+//     setup_pulsed_position_control(ctx, SMC05_INSERTION_RATE_RPM, SMC05_WITHDRAWAL_RATE_RPM).await?;
+//     pulse_dipper_withdrawal(ctx, 1000).await?;
+//     println!("{} start Recatalyze phase w/Rewma {:.2} Ohms", 
+//         trans_utc_ms, 
+//         state.ohms_ewma, 
+//     );
+//     Ok(RECATALYZE_CURRENT_MA)
+// }
 
 /// Transition to SyncMoveCurrent phase
 async fn trans_sync_move_current_phase(ctx: &mut tokio_modbus::client::Context, state: &mut ElectrodeState, trans_utc_ms: i64)
@@ -536,15 +548,8 @@ async fn trans_sync_move_current_phase(ctx: &mut tokio_modbus::client::Context, 
     state.drive_phase = DrivePhase::SyncMoveCurrent;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
-    // set slow withdrawal speed and withdraw very briefly
-    
-    const PULSE_DIST: u16 = (16000. * 1.25) as u16; // 1.25 cm / 12.5 mm
-    const NUM_WORK_CYCLES: u16 = 444;
-
-    setup_bouncy_mode(ctx, SMC05_WITHDRAWAL_RATE_RPM/3., SMC05_WITHDRAWAL_RATE_RPM, 
-        PULSE_DIST, PULSE_DIST, NUM_WORK_CYCLES).await?;
-    // setup_pulsed_position_control(ctx, SMC05_INSERTION_RATE_RPM, SMC05_WITHDRAWAL_RATE_RPM).await?;
-    // pulse_dipper_withdrawal(ctx, 1000).await?;
+    setup_bouncy_mode(ctx, BOUNCY_INSERTION_RATE_RPM, BOUNCY_WITHDRAWAL_RATE_RPM, 
+        BOUNCE_PULSE_DIST, BOUNCE_PULSE_DIST, NUM_BOUNCY_WORK_CYCLES).await?;
     start_sport_mode06_sequence(ctx).await?;
 
     println!("{} start SyncMove phase w/Rewma {:.2} Ohms", 
@@ -633,6 +638,26 @@ pub async fn dipper_cycle_check(ctx: &mut tokio_modbus::client::Context,
     }
 
     Ok(())
+}
+
+/// Check growth termination conditions 
+fn check_resistance_drop(ohms_ewma_valid: bool,  state: &mut ElectrodeState, check_utc_ms: i64) -> bool
+{
+    let mut should_terminate = false;
+    if ohms_ewma_valid {
+        if state.ohms_ewma < state.highv_minr_ohms {
+            println!("{} highv {:.2} V,  HV_MinR -> {:.3} Ω", 
+                check_utc_ms, state.measured_volts, state.ohms_ewma);
+            state.highv_minr_ohms = state.ohms_ewma;
+            state.highv_minr_update_ms = check_utc_ms;
+
+            // ensure we haven't shorted out growth/anode/cathode
+            if state.ohms_ewma < GROWTH_TERMINATION_OHMS {
+                should_terminate = true;
+            }
+        }
+    }
+    should_terminate    
 }
 
 /// 
@@ -729,48 +754,37 @@ async fn control_electrodes(ctx: &mut tokio_modbus::client::Context,
             // new_drive_ma = elongation_current_ma_at_time_ms(phase_duration_ms);
             new_drive_ma = MAX_ELONGATION_CURRENT_MA;
 
-            if ohms_ewma_valid {
-                // check for cyclic growth termination condition
-                if state.ohms_ewma < state.highv_minr_ohms {
-                    println!("{} highv {:.2} V,  HV_MinR -> {:.3} Ω", 
-                        after_drive_utc_ms, state.measured_volts, state.ohms_ewma);
-                    state.highv_minr_ohms = state.ohms_ewma;
-                    state.highv_minr_update_ms = after_drive_utc_ms;
-
-                    if state.ohms_ewma < CYCLIC_TERMINATION_OHMS {
-                        new_drive_ma =
-                            trans_holding_phase(ctx, state, 
-                                after_drive_utc_ms,
-                                phase_duration_ms).await?;
-                    }
-                }
+            let should_terminate = check_resistance_drop(ohms_ewma_valid,state, after_drive_utc_ms);
+            if should_terminate {                        
+                new_drive_ma = trans_holding_phase(ctx, state,  after_drive_utc_ms, phase_duration_ms).await?;
             }
-            // if phase_duration_ms > ELONGATION_CYCLE_DURATION_MS 
-            //     && state.drive_phase != DrivePhase::Holding {
-            //     new_drive_ma = trans_recatalyze_phase(ctx, state, after_drive_utc_ms).await?;
-            // }
-
+            else if phase_duration_ms > ELONGATION_CYCLE_DURATION_MS {
+                // After an initial Elongation growth phase, transition to synchronized movement & current drive
+                new_drive_ma = trans_sync_move_current_phase(ctx, state, after_drive_utc_ms).await?;
+            }
         }
-        DrivePhase::Recatalyze => {
-            new_drive_ma = MAX_NUCLEATION_CURRENT_MA;
-            set_all_anode_connections(&mut state.anode_connections, true);
+        // DrivePhase::Recatalyze => {
+        //     new_drive_ma = MAX_NUCLEATION_CURRENT_MA;
+        //     set_all_anode_connections(&mut state.anode_connections, true);
 
-            if phase_duration_ms > RECATALYZE_DURATION_MS  {
-                trans_elongation_phase(ctx, state, after_drive_utc_ms, phase_duration_ms).await?;
-            } 
-        }
+        //     if phase_duration_ms > RECATALYZE_DURATION_MS  {
+        //         trans_elongation_phase(ctx, state, after_drive_utc_ms, phase_duration_ms).await?;
+        //     } 
+        // }
         DrivePhase::SyncMoveCurrent => {
             new_drive_ma = RECATALYZE_CURRENT_MA;
             //Read the current motor movement direction:
             // If it's reverse (withdrawing) then set high current,
             // If it's forward (inserting) then set low current
-            let (op_status, motor_direction) = 
-                report_smc05_motor_status(ctx).await?;
-                // read_stepper_driver_status(ctx).await?; 
+            let (op_status, motor_direction) =   report_smc05_motor_status(ctx).await?;
             if op_status == SMC05_MOTION_STATUS_CONSTANT_SPEED {
                 if motor_direction == SMC05_ROTATION_DIR_REV {
                     new_drive_ma = MAX_ELONGATION_CURRENT_MA;
                 }
+            }
+            let should_terminate = check_resistance_drop(ohms_ewma_valid,state, after_drive_utc_ms);
+            if should_terminate {                        
+                new_drive_ma = trans_holding_phase(ctx, state,  after_drive_utc_ms, phase_duration_ms).await?;
             }
         }
         DrivePhase::Holding => {
@@ -908,12 +922,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Warmup {:.1} mA ; Holding {:.1} mA", WARMUP_CURRENT_MA, HOLDING_PROBE_CURRENT_MA);
     println!("Nucleate {} minutes , {:.2} A/cm2, {:.2} mA max", 
         NUCLEATION_DURATION_MINUTES, NUCLEATION_CURRENT_DENSITY_AMPS_CM2, MAX_NUCLEATION_CURRENT_MA);
-    println!("Elongate: Max {:.2} A/cm2, {:.2} mA, Ramp {:.6} mA/ms, Period {}, Term {:.1} Ω \nInsert {:.1} RPM, Retract {:.1} RPM, ", 
-        MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, RAMP_RANGE_MA_PER_MS, ELONGATION_CYCLE_PERIOD_MS, CYCLIC_TERMINATION_OHMS,
-        SMC05_INSERTION_RATE_RPM,  SMC05_WITHDRAWAL_RATE_RPM,
-        );
-    println!("Dipper insertion duration: {} ms, detect current ratio {:.2} ", INSERTION_DURATION_MS, SURFACE_CONTACT_THRESHOLD_RATIO);
-
+    println!("Elongate {} minurtes, Max {:.2} A/cm2, {:.2} mA, Term {:.1} Ω", 
+        ELONGATION_DURATION_MINUTES, MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, GROWTH_TERMINATION_OHMS);
+    println!("SyncMove: PulseDist {}, Insert {:.1} RPM, Retract {:.1} RPM, Term {:.1} Ω", 
+        BOUNCE_PULSE_DIST, BOUNCY_INSERTION_RATE_RPM,  BOUNCY_WITHDRAWAL_RATE_RPM, GROWTH_TERMINATION_OHMS );
+    // println!("Dipper insertion duration: {} ms, detect current ratio {:.2} ", INSERTION_DURATION_MS, SURFACE_CONTACT_THRESHOLD_RATIO);
 
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
     let mut csv_writer = BufWriter::new(logfile);

@@ -45,11 +45,7 @@ pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = SMC05_XSLOW_MOVE_RATE_RPM * 10.;
 pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = SMC05_SLOW_MOVE_RATE_RPM * 2.;
 pub const SMC05_FAST_MOVE_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM * 10.;
 
-/// Rate at which we should insert the cathode probe
-pub const SMC05_INSERTION_RATE_RPM: f32 = SMC05_XSLOW_MOVE_RATE_RPM;
 
-/// Very slow rate at which a cathode can be extracted with precision
-pub const SMC05_WITHDRAWAL_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM;
 
 
 /// In this "sport mode", run either fwd or rev on command: stop on same command or using start/stop command
@@ -128,9 +124,9 @@ pub async fn start_sport_mode06_sequence(ctx: &mut tokio_modbus::client::Context
 pub async fn report_smc05_motor_status(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(u16, u16), Box<dyn std::error::Error>>
 {
-    let (op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
-    println!("{} SMC05 > op {} dir {} pulse {} action {}", 
-        chrono::Utc::now().timestamp_millis(), op_status, motor_direction, pulse_count, action_count);
+    let (op_status, motor_direction, _pulse_count, _action_count) = read_stepper_driver_status(ctx).await?;
+    // println!("{} SMC05 > op {} dir {} pulse {} action {}", 
+    //     chrono::Utc::now().timestamp_millis(), op_status, motor_direction, pulse_count, action_count);
     Ok((op_status, motor_direction))
 }
 
@@ -251,8 +247,8 @@ pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context
 
     // configure for surface contact probing
     report_smc05_system_config(ctx).await?;
-    set_fwd_speed(ctx, SMC05_INSERTION_RATE_RPM).await?;
-    set_rev_speed(ctx, SMC05_WITHDRAWAL_RATE_RPM).await?;
+    set_fwd_speed(ctx, SMC05_SLOW_MOVE_RATE_RPM).await?;
+    set_rev_speed(ctx, SMC05_XSLOW_MOVE_RATE_RPM).await?;
     report_smc05_system_config(ctx).await?;
 
     Ok(())
