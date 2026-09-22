@@ -222,16 +222,20 @@ pub async fn toggle_dipper_monitor(ctx: &mut tokio_modbus::client::Context, stat
     Ok(())
 }
 
+pub async fn force_stop_motion(ctx: &mut tokio_modbus::client::Context)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    println!("Stopping SMC05 motion...");
+    enable_sport_mode03(ctx).await?;
+    stop_smc05_rotation(ctx).await?;
+    Ok(())
+}
+
 /// Disable the dipper monitor
 pub async fn disable_dipper_motion(ctx: &mut tokio_modbus::client::Context, state: &mut StepperDriverState)
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    enable_sport_mode03(ctx).await?;
-
-    // if state.dipper_last_status_check_ms != 0 || state.dipper_enabled {
-    //     println!("Stopping dipper motion...");
-        stop_smc05_rotation(ctx).await?;
-    // }
+    force_stop_motion(ctx).await?;
 
     state.dipper_enabled = false;
     state.dipper_last_status_check_ms = 0;
@@ -435,10 +439,8 @@ pub async fn setup_bouncy_mode(ctx: &mut tokio_modbus::client::Context,
 ) 
 -> Result<(u16, u16, u16, u16), Box<dyn std::error::Error>> 
 {
-
     ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
     report_smc05_motor_status(ctx).await?;
-    stop_smc05_rotation(ctx).await?;
     report_smc05_system_config(ctx).await?;
 
     set_smc05_sport_mode(ctx, SMC05_SPORT_MODE_06_FWD_REV_LOOP).await?;

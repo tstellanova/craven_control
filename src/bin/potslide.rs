@@ -99,7 +99,7 @@ const CATHODE_SURFACE_AREA_MM2:f32 = CATHODE_SA_SIMPLE_ROD_MM2; //CATHODE_SA_FLA
 const CATHODE_SURFACE_AREA_CM2: f32 = CATHODE_SURFACE_AREA_MM2 / 100.;
 
 /// Maximum current density for growing elongated CNTs from the nucleation sites
-const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 1.0; 
+const MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.8; 
 const MIN_ELONGATION_CURRENT_DENSITY_AMPS_CM2:f32 = 0.4; 
 
 const NOM_ELONGATION_CURRENT_MA:f32 = CATHODE_SURFACE_AREA_CM2 * MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2 * 1000. ;
@@ -117,7 +117,7 @@ const NOM_NUCLEATION_CURRENT_MA:f32 = CATHODE_SURFACE_AREA_CM2 * NUCLEATION_CURR
 /// Maximum allowed current density during Nucleation phase
 const MAX_NUCLEATION_CURRENT_MA:f32 =  f32::min(MAX_DRIVE_CURRENT_MA, NOM_NUCLEATION_CURRENT_MA);
 
-const RECATALYZE_CURRENT_MA:f32 = MAX_NUCLEATION_CURRENT_MA;
+const RECATALYZE_CURRENT_MA:f32 = MAX_ELONGATION_CURRENT_MA / 4.;
 
 /// Highest possible voltage potential to use during Cyclic drive phase, where carbon growth is driven. 
 const CYCLIC_GROWTH_PEAK_V: f32 = 3.2;
@@ -176,13 +176,13 @@ const SURFACE_CONTACT_THRESHOLD_RATIO: f32 = 2.;
 
 
 /// How far to travel forward and back when dipper is in bouncy mode, in number of pulses
-const BOUNCE_PULSE_DIST: u16 = (16000. * 1.) as u16; // 1 cm / 10 mm bounce
+const BOUNCE_PULSE_DIST: u16 = (16000. * 1.25) as u16; // 1.25 cm / 12.5 mm bounce
 /// Number of cycles to bounce. 
 const NUM_BOUNCY_WORK_CYCLES: u16 = 888;
 /// Rate at which we should insert the cathode probe
-const BOUNCY_INSERTION_RATE_RPM: f32 = 30.;
+const BOUNCY_INSERTION_RATE_RPM: f32 = 60.;
 /// Rate at which a cathode can be extracted with precision
-const BOUNCY_WITHDRAWAL_RATE_RPM: f32 = 60.;
+const BOUNCY_RETRACTION_RATE_RPM: f32 = 90.;
 
 /// Update the given Exponential Weighted Moving Average with a new value
 fn update_ewma(ewma: &mut f32, new_value: f32, alpha: f32) {
@@ -256,8 +256,7 @@ async fn zero_control_outputs(ctx: &mut tokio_modbus::client::Context)
     toggle_furnace(ctx, false).await?;
     set_electrode_current_drive(ctx,0.).await?;
 
-    enable_sport_mode03(ctx).await?;
-    stop_smc05_rotation(ctx).await?;
+    force_stop_motion(ctx).await?;
 
     // let anode_channels= [false; 4];
     // write_wav_octo_relays(ctx, &anode_channels).await?;
@@ -548,7 +547,10 @@ async fn trans_sync_move_current_phase(ctx: &mut tokio_modbus::client::Context, 
     state.drive_phase = DrivePhase::SyncMoveCurrent;
     state.phase_start_ms = trans_utc_ms;
     state.phase_starts_utc_ms[state.drive_phase as usize] = trans_utc_ms;
-    setup_bouncy_mode(ctx, BOUNCY_INSERTION_RATE_RPM, BOUNCY_WITHDRAWAL_RATE_RPM, 
+        
+    disable_dipper_motion(ctx, &mut state.dipper_state).await?;
+
+    setup_bouncy_mode(ctx, BOUNCY_INSERTION_RATE_RPM, BOUNCY_RETRACTION_RATE_RPM, 
         BOUNCE_PULSE_DIST, BOUNCE_PULSE_DIST, NUM_BOUNCY_WORK_CYCLES).await?;
     start_sport_mode06_sequence(ctx).await?;
 
@@ -931,7 +933,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Elongate {} minutes, Max {:.2} A/cm2, {:.2} mA, Term {:.1} Ω", 
         ELONGATION_DURATION_MINUTES, MAX_ELONGATION_CURRENT_DENSITY_AMPS_CM2, MAX_ELONGATION_CURRENT_MA, GROWTH_TERMINATION_OHMS);
     println!("SyncMove: PulseDist {}, Insert {:.1} RPM, Retract {:.1} RPM, Term {:.1} Ω", 
-        BOUNCE_PULSE_DIST, BOUNCY_INSERTION_RATE_RPM,  BOUNCY_WITHDRAWAL_RATE_RPM, GROWTH_TERMINATION_OHMS );
+        BOUNCE_PULSE_DIST, BOUNCY_INSERTION_RATE_RPM,  BOUNCY_RETRACTION_RATE_RPM, GROWTH_TERMINATION_OHMS );
     // println!("Dipper insertion duration: {} ms, detect current ratio {:.2} ", INSERTION_DURATION_MS, SURFACE_CONTACT_THRESHOLD_RATIO);
 
     let logfile = File::create(format!("./data/{}",log_out_filename))?;
