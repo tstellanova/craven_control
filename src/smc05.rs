@@ -7,11 +7,20 @@ pub const REG_NODEID_SMC05: u16 = 0x0018;
 /// SMC05 action mode, such as stepping forward and back or running a preprogrammed action loop
 pub const REG_SMC05_SPORT_MODE: u16 = 0x0000; 
 
+/// SMC05 number of forward pulses to use in repeated cycles
+pub const REG_SMC05_FWD_PULSES_COUNT: u16 = 0x0001;
+
+/// SMC05 number of forward pulses to use in repeated cycles
+pub const REG_SMC05_REV_PULSES_COUNT: u16 = 0x0004;
+
 /// SMC05 forward rotation speed (Rotations Per Minute)
 pub const REG_SMC05_FWD_RPM: u16 = 0x0003;
 
 /// SMC05 reverse rotation speed (Rotations Per Minute)
 pub const REG_SMC05_REV_RPM: u16 = 0x0006;
+
+/// Number of cycles to repeat in eg sport mode 06
+pub const REG_SMC05_NUM_WORK_CYCLES: u16 = 0x0007;
 
 /// SMC05 Current motor operating status: 0 stop, 1 acceleration, 2 deceleration , 3 uniform speed 
 pub const REG_SMC05_CUR_MOTOR_STATUS:u16  = 0x001A;
@@ -31,13 +40,12 @@ pub const SMC05_MOTION_STATUS_CONSTANT_SPEED: u16 = 3;
 /// Minimum rate at which the motor can move (without stopping)
 pub const SMC05_MIN_MOVE_RATE_RPM: f32 = 0.1;
 
-pub const SMC05_XSLOW_MOVE_RATE_RPM: f32 = 5.;
-pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = 60.;
+pub const SMC05_XSLOW_MOVE_RATE_RPM: f32 = 6.;
+pub const SMC05_SLOW_MOVE_RATE_RPM: f32 = SMC05_XSLOW_MOVE_RATE_RPM * 10.;
 pub const SMC05_MEDIUM_MOVE_RATE_RPM: f32 = SMC05_SLOW_MOVE_RATE_RPM * 2.;
-pub const SMC05_INSERTION_RATE_RPM: f32 = 10. * SMC05_XSLOW_MOVE_RATE_RPM;
+pub const SMC05_FAST_MOVE_RATE_RPM: f32 = SMC05_MEDIUM_MOVE_RATE_RPM * 10.;
 
-/// Very slow rate at which a cathode can be extracted with precision
-pub const SMC05_WITHDRAWAL_RATE_RPM: f32 = SMC05_XSLOW_MOVE_RATE_RPM;
+
 
 
 /// In this "sport mode", run either fwd or rev on command: stop on same command or using start/stop command
@@ -89,7 +97,7 @@ impl Default for StepperDriverState {
 
 
 /// # Returns 
-/// (motion_direction, pulse_count, action_count) 
+/// (op_status, motion_direction, pulse_count, action_count) 
 pub async fn read_stepper_driver_status(ctx: &mut tokio_modbus::client::Context)
 -> Result<(u16, u16, u16, u16), Box<dyn std::error::Error>> 
 {
@@ -106,15 +114,19 @@ pub async fn read_stepper_driver_status(ctx: &mut tokio_modbus::client::Context)
 pub async fn start_sport_mode06_sequence(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    send_smc05_start_stop_cmd(ctx).await
+    println!("start_sport_mode06_sequence...");
+    start_smc05_fwd_rotation(ctx).await
 }
 
+///
+/// # Returns:
+/// (op_status, motor_direction)
 pub async fn report_smc05_motor_status(ctx: &mut tokio_modbus::client::Context) 
 -> Result<(u16, u16), Box<dyn std::error::Error>>
 {
-    let (op_status, motor_direction, pulse_count, action_count) = read_stepper_driver_status(ctx).await?;
-    println!("{} SMC05 > op {} dir {} pulse {} action {}", 
-        chrono::Utc::now().timestamp_millis(), op_status, motor_direction, pulse_count, action_count);
+    let (op_status, motor_direction, _pulse_count, _action_count) = read_stepper_driver_status(ctx).await?;
+    // println!("{} SMC05 > op {} dir {} pulse {} action {}", 
+    //     chrono::Utc::now().timestamp_millis(), op_status, motor_direction, pulse_count, action_count);
     Ok((op_status, motor_direction))
 }
 
@@ -210,14 +222,20 @@ pub async fn toggle_dipper_monitor(ctx: &mut tokio_modbus::client::Context, stat
     Ok(())
 }
 
+pub async fn force_stop_motion(ctx: &mut tokio_modbus::client::Context)
+-> Result<(), Box<dyn std::error::Error>> 
+{
+    println!("Stopping SMC05 motion...");
+    enable_sport_mode03(ctx).await?;
+    stop_smc05_rotation(ctx).await?;
+    Ok(())
+}
+
 /// Disable the dipper monitor
 pub async fn disable_dipper_motion(ctx: &mut tokio_modbus::client::Context, state: &mut StepperDriverState)
 -> Result<(), Box<dyn std::error::Error>> 
 {
-    if state.dipper_last_status_check_ms != 0 || state.dipper_enabled {
-        println!("Stopping dipper motion...");
-        stop_smc05_rotation(ctx).await?;
-    }
+    force_stop_motion(ctx).await?;
 
     state.dipper_enabled = false;
     state.dipper_last_status_check_ms = 0;
@@ -233,8 +251,8 @@ pub async fn setup_cathode_surface_probe(ctx: &mut tokio_modbus::client::Context
 
     // configure for surface contact probing
     report_smc05_system_config(ctx).await?;
-    set_fwd_speed(ctx, SMC05_INSERTION_RATE_RPM).await?;
-    set_rev_speed(ctx, SMC05_WITHDRAWAL_RATE_RPM).await?;
+    set_fwd_speed(ctx, SMC05_SLOW_MOVE_RATE_RPM).await?;
+    set_rev_speed(ctx, SMC05_XSLOW_MOVE_RATE_RPM).await?;
     report_smc05_system_config(ctx).await?;
 
     Ok(())
@@ -358,6 +376,22 @@ pub async fn set_rev_speed(ctx: &mut tokio_modbus::client::Context, rpm: f32)
     Ok(())
 }
 
+pub async fn set_fwd_pulses_count(ctx: &mut tokio_modbus::client::Context, count: u16)
+    -> Result<(), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+    ctx.write_single_register(REG_SMC05_FWD_PULSES_COUNT, count).await??;
+    Ok(())
+}
+
+pub async fn set_rev_pulses_count(ctx: &mut tokio_modbus::client::Context, count: u16)
+    -> Result<(), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+    ctx.write_single_register(REG_SMC05_REV_PULSES_COUNT, count).await??;
+    Ok(())
+}
+
 ///
 /// Set the sport mode of the SMC05 stepper driver
 /// 
@@ -394,6 +428,33 @@ pub async fn enable_sport_mode06(ctx: &mut tokio_modbus::client::Context,
 
 
 
+///
+/// Configure dipper for bouncing up and down repeatedly in consistent (pulse) distance
+/// # Returns status after configuration:
+/// (op_status, motion_direction, pulse_count, action_count) 
+pub async fn setup_bouncy_mode(ctx: &mut tokio_modbus::client::Context, 
+    insert_rate_rpm: f32, withdraw_rate_rpm: f32, 
+    insert_pulses: u16, withdraw_pulses:u16,
+    num_work_cycles: u16
+) 
+-> Result<(u16, u16, u16, u16), Box<dyn std::error::Error>> 
+{
+    ctx.set_slave(Slave(NODEID_SMC05_STEP_DRIVER));
+    report_smc05_motor_status(ctx).await?;
+    report_smc05_system_config(ctx).await?;
+
+    set_smc05_sport_mode(ctx, SMC05_SPORT_MODE_06_FWD_REV_LOOP).await?;
+    set_fwd_speed(ctx, insert_rate_rpm).await?;
+    set_rev_speed(ctx, withdraw_rate_rpm).await?;
+
+    set_fwd_pulses_count(ctx, insert_pulses).await?;
+    set_rev_pulses_count(ctx, withdraw_pulses).await?;
+
+    ctx.write_single_register(REG_SMC05_NUM_WORK_CYCLES, num_work_cycles).await??;
+
+    report_smc05_system_config(ctx).await?;
+    read_stepper_driver_status(ctx).await
+}
 
 
 
